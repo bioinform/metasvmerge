@@ -5,6 +5,12 @@ import argparse
 from metasv.main import run_metasv
 from metasv.defaults import *
 from metasv._version import __version__
+import logging
+import os
+
+FORMAT = '%(levelname)s %(asctime)-15s %(name)-20s %(message)s'
+logging.basicConfig(level=logging.INFO, format=FORMAT)
+logger = logging.getLogger(__name__)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Merge SVs from multiple tools for accurate SV calling",
@@ -101,7 +107,8 @@ if __name__ == "__main__":
 
     as_parser = parser.add_argument_group("Assembly options")
     as_parser.add_argument("--spades", help="Path to SPAdes executable", required=False)
-    as_parser.add_argument("--disable_assembly", action="store_true", help="Disable assembly")
+    as_parser.add_argument("--disable_assembly", action="store_true", help="Disable assembly (deprecated)")
+    as_parser.add_argument("--assembly", choices=ASM_RUN_MODES, default=ASM_FULL, help="Assembly execution plan")
     as_parser.add_argument("--svs_to_assemble", nargs="+", help="SVs to assemble", default=SVS_ASSEMBLY_SUPPORTED,
                            choices=SVS_ASSEMBLY_SUPPORTED)
     as_parser.add_argument("--svs_to_softclip", nargs="+", help="SVs to soft-clip", default=SVS_SOFTCLIP_SUPPORTED,
@@ -142,6 +149,14 @@ if __name__ == "__main__":
     other_parser.add_argument('--version', action='version', version='%(prog)s ' + __version__)
 
     args = parser.parse_args()
+
+    if args.disable_assembly:
+        if args.assembly != ASM_DISABLE:
+            logger.error("Deprecated argument --disable_assembly contradicts --assembly=%s." % args.assembly)
+            sys.exit(os.EX_USAGE)
+        else:
+            args.assembly = ASM_DISABLE
+            logger.warn("Argument --disable_assembly is deprecated. Use --assembly=%s instead." % ASM_DISABLE)
 
     args.svs_to_assemble = set(args.svs_to_assemble) & set(args.svs_to_report)
     args.svs_to_softclip = set(args.svs_to_softclip) & set(args.svs_to_report)
