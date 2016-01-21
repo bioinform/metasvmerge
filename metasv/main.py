@@ -37,6 +37,10 @@ def make_contig_whiteset(args, reference_contigs):
     return contig_whitelist
 
 
+def canonical_result_file(args):
+    return os.path.join(args.outdir, "variants.vcf")
+
+
 def run_metasv(args):
     logger.info("Running MetaSV %s" % __version__)
     logger.info("Arguments are " + str(args))
@@ -257,7 +261,7 @@ def run_metasv(args):
     for key in sorted(final_stats.keys()):
         logger.info(str(key) + ":" + str(final_stats[key]))
 
-    final_vcf = os.path.join(args.outdir, "variants.vcf")
+    final_vcf = canonical_result_file(args)
 
     # Run assembly here
     if args.assembly == ASM_DISABLE:
@@ -294,7 +298,7 @@ def run_metasv(args):
                                              padding=args.assembly_pad, workdir=args.workdir, spades_exec=args.spades,
                                              sp_opts=args, age_exec=args.age, age_opts=args, gt_opts=args)
             logger.info("Output final VCF file")
-            convert_metasv_bed_to_vcf(bedfile=genotyped_bed, vcf_out=final_vcf, workdir=args.workdir,
+            convert_metasv_bed_to_vcf(bedfile=[genotyped_bed], vcf_out=final_vcf, workdir=args.workdir,
                                       sample=args.sample, pass_calls=False)
 
     logger.info("Clean up pybedtools")
@@ -350,4 +354,11 @@ def run_distributed_assembly(args):
                                 spades_exec=args.spades, sp_opts=args, age_exec=args.age, age_opts=args, gt_opts=args,
                                 slicing=[args.asm_worker_id, args.asm_fleet])
     logger.info("Done. Wrote genotyped BED file %s" % out_file)
+    return os.EX_OK
+
+
+def run_merge_assembly_slices(args):
+    logger.info("Merging %d genotyped BED files from parallel assembly..." % len(args.asm_slices))
+    convert_metasv_bed_to_vcf(bedfiles=args.asm_slices, vcf_out=canonical_result_file(args), workdir=args.workdir,
+                              sample=args.sample, pass_calls=False)
     return os.EX_OK

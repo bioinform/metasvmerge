@@ -2,11 +2,10 @@
 
 import sys
 import argparse
-from metasv.main import run_metasv, run_distributed_assembly
+from metasv.main import run_metasv, run_distributed_assembly, run_merge_assembly_slices
 from metasv.defaults import *
 from metasv._version import __version__
 import logging
-import os
 
 FORMAT = '%(levelname)s %(asctime)-15s %(name)-20s %(message)s'
 logging.basicConfig(level=logging.INFO, format=FORMAT)
@@ -110,6 +109,7 @@ if __name__ == "__main__":
     as_parser.add_argument("--asm_fleet", help="Total number of workers used for parallel execution of assembly", type=int)
     as_parser.add_argument("--asm_worker_id", help="Zero-based worker ID for contributing to parallel assembly", type=int)
     as_parser.add_argument("--asm_bed", help="BED file of regions to assemble when --assembly=%s" % ASM_SLICED)
+    as_parser.add_argument("--asm_slices", help="Genotyped BED slices to be merged into final VCF.", nargs="+", default=[])
     as_parser.add_argument("--svs_to_assemble", nargs="+", help="SVs to assemble", default=SVS_ASSEMBLY_SUPPORTED,
                            choices=SVS_ASSEMBLY_SUPPORTED)
     as_parser.add_argument("--svs_to_softclip", nargs="+", help="SVs to soft-clip", default=SVS_SOFTCLIP_SUPPORTED,
@@ -171,5 +171,9 @@ if __name__ == "__main__":
         if args.asm_worker_id >= args.asm_fleet:
             parser.error("Worker ID --asm_worker_id exceeds fleet size --asm_fleet.")
         sys.exit(run_distributed_assembly(args))
+    elif args.assembly == ASM_MERGE:
+        if not args.asm_slices:
+            parser.error("No input BED files specified by --asm_slices for --assembly=%s" % ASM_MERGE)
+        sys.exit(run_merge_assembly_slices(args))
     else:
         sys.exit(run_metasv(args))
