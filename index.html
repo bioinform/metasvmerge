@@ -206,10 +206,16 @@ of MetaSV is 0.3. In general, the install source would be https://github.com/bio
 			<td>Enable for soft-clip analysis</td>
 		  </tr>	  
 		  <tr>
-			<td><code>--disable_assembly</code></td>
-			<td>Disable assembly
-                        (default: False)</td> 
-			<td>--</td>
+			<td><code>--assembly</code></td>
+			<td>Specify one of the following assembly execution strategies:
+			  <ul><code>disable</code>: skip the assembly process entirely</ul>
+			  <ul><code>run</code>: execute assembly on one node (default)</ul>
+			  <ul><code>defer</code>: exit MetaSV after preparing BED file with assembly goals</ul>
+			  <ul><code>parallel</code>: continue with assembly as one of many worker nodes</ul>
+			  <ul><code>merge</code>: merge assembly results to produce final variants file</ul>
+                        </td> 
+			<td><code>defer</code>, <code>parallel</code>, and <code>merge</code> are useful
+                          for executing MetaSV on compute clusters</td>
 		  </tr>
 		  <tr>
 			<td><code>--bam STRING</code></td>
