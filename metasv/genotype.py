@@ -167,7 +167,8 @@ def parallel_genotype_intervals(intervals_file=None, bam=None, workdir=None, nth
         for i in xrange(nthreads):
             process_workdir = os.path.join(workdir, str(i))
             proc_out_file = os.path.join(process_workdir, "genotyped.bed")
-            kwargs_dict = {"selected_intervals": selected_intervals, "bam": bam, "workdir": process_workdir,
+            sliced_intervals = [interval for (j, interval) in enumerate(selected_intervals) if (j % nthreads) == i]
+            kwargs_dict = {"selected_intervals": sliced_intervals, "bam": bam, "workdir": process_workdir,
                            "window": window, "isize_mean": isize_mean, "isize_sd": isize_sd, "out_file": proc_out_file,
                            "normal_frac_threshold": normal_frac_threshold, "nthreads": nthreads}
             pool.apply_async(genotype_intervals, kwds=kwargs_dict,
