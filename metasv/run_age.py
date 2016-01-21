@@ -50,8 +50,6 @@ def run_age_single(intervals_bed=None, region_list=[], contig_dict={}, reference
     assembly_fasta = pysam.Fastafile(assembly) if assembly else None
     reference_fasta = pysam.Fastafile(reference)
 
-    breakpoints_bed = None
-
     thread_logger.info("Will process %d intervals" % (len(region_list)))
 
     try:
@@ -201,7 +199,7 @@ def run_age_single(intervals_bed=None, region_list=[], contig_dict={}, reference
     if bedtools_intervals:
         pybedtools.BedTool(bedtools_intervals).saveas(out_file)
 
-    return breakpoints_bed
+    return out_file
 
 
 def run_age_single_callback(result, result_list):
