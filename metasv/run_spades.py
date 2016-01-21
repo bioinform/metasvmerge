@@ -33,15 +33,15 @@ def append_contigs(src, interval, dst_fd, fn_id=0, sv_type="INS"):
 
 
 def run_spades_single(intervals=[], bam=None, spades=None, work=None, pad=SPADES_PAD, timeout=SPADES_TIMEOUT,
-                      isize_min=ISIZE_MIN,
-                      isize_max=ISIZE_MAX, stop_on_fail=False, max_read_pairs=EXTRACTION_MAX_READ_PAIRS):
+                      isize_min=ISIZE_MIN, isize_max=ISIZE_MAX, stop_on_fail=False, out_file=None,
+                      max_read_pairs=EXTRACTION_MAX_READ_PAIRS):
     thread_logger = logging.getLogger("%s-%s" % (run_spades_single.__name__, multiprocessing.current_process()))
 
     if not os.path.isdir(work):
         thread_logger.info("Creating %s" % work)
         os.makedirs(work)
 
-    merged_contigs = open(os.path.join(work, "merged.fa"), "w")
+    merged_contigs = open(out_file, "w")
     spades_log_fd = open(os.path.join(work, "spades.log"), "w")
 
     extract_fns = [extract_pairs.all_pair_hq, extract_pairs.non_perfect_hq]
@@ -93,8 +93,7 @@ def run_spades_single(intervals=[], bam=None, spades=None, work=None, pad=SPADES
         raise e
 
     merged_contigs.close()
-
-    return os.path.abspath(merged_contigs.name)
+    return merged_contigs.name
 
 
 def run_spades_single_callback(result, result_list):
@@ -104,7 +103,6 @@ def run_spades_single_callback(result, result_list):
 
 def should_be_assembled(interval, max_interval_size=SPADES_MAX_INTERVAL_SIZE,
                         svs_to_assemble=SVS_ASSEMBLY_SUPPORTED, assembly_max_tools=ASSEMBLY_MAX_TOOLS):
-
     name_fields = interval.name.split(",")
     max_interval_size_sv = max_interval_size if "INS" in name_fields[1] else SPADES_MAX_INTERVAL_SIZE_2BP
 
@@ -132,7 +130,6 @@ def should_be_assembled(interval, max_interval_size=SPADES_MAX_INTERVAL_SIZE,
     if "SC" in methods:
         methods.discard("SC")
         num_tools -= 1 
-    
 
     return  num_tools <= assembly_max_tools or not (methods & precise_methods)
     
@@ -170,11 +167,13 @@ def run_spades_parallel(bam=None, spades=None, bed=None, work=None, pad=SPADES_P
         return None, None
 
     bedtool = pybedtools.BedTool(bed)
-    total = bedtool.count()
 
     chrs = set(chrs)
     all_intervals = [interval for interval in bedtool] if not chrs else [interval for interval in bedtool if
                                                                          interval.chrom in chrs]
+    # TODO: slice out the intervals to be processed by other nodes
+
+    # # # # # #
     selected_intervals = filter(partial(should_be_assembled, max_interval_size=max_interval_size,
                                         svs_to_assemble=svs_to_assemble, assembly_max_tools=assembly_max_tools),
                                 all_intervals)
@@ -185,24 +184,30 @@ def run_spades_parallel(bam=None, spades=None, bed=None, work=None, pad=SPADES_P
     logger.info("%d intervals selected" % len(selected_intervals))
     logger.info("%d intervals ignored" % len(ignored_intervals))
 
-    pool = multiprocessing.Pool(nthreads)
-    assembly_fastas = []
-    for i in xrange(nthreads):
-        intervals = [interval for (j, interval) in enumerate(selected_intervals) if (j % nthreads) == i]
-        kwargs_dict = {"intervals": intervals, "bam": bam, "spades": spades, "work": "%s/%d" % (work, i), "pad": pad,
-                       "timeout": timeout, "isize_min": isize_min, "isize_max": isize_max, "stop_on_fail": stop_on_fail,
-                       "max_read_pairs": max_read_pairs}
-        pool.apply_async(run_spades_single, kwds=kwargs_dict,
-                         callback=partial(run_spades_single_callback, result_list=assembly_fastas))
-
-    pool.close()
-    pool.join()
-
-    logger.info("Merging the contigs from %s" % (str(assembly_fastas)))
     assembled_fasta = os.path.join(work, "spades_assembled.fa")
-    with open(assembled_fasta, "w") as assembled_fd:
-        for line in fileinput.input(assembly_fastas):
-            assembled_fd.write("%s\n" % (line.strip()))
+    if nthreads > 1:
+        assembly_fastas = []
+        pool = multiprocessing.Pool(nthreads)
+        for i in xrange(nthreads):
+            intervals = [interval for (j, interval) in enumerate(selected_intervals) if (j % nthreads) == i]
+            proc_work_dir = "%s/%d" % (work, i)
+            out_file = os.path.join(proc_work_dir, "merged.fa")
+            kwargs_dict = {"intervals": intervals, "bam": bam, "spades": spades, "work": proc_work_dir,
+                           "pad": pad, "timeout": timeout, "isize_min": isize_min, "isize_max": isize_max,
+                           "stop_on_fail": stop_on_fail, "max_read_pairs": max_read_pairs, "out_file": out_file}
+            pool.apply_async(run_spades_single, kwds=kwargs_dict,
+                             callback=partial(run_spades_single_callback, result_list=assembly_fastas))
+        pool.close()
+        pool.join()
+        logger.info("Merging the contigs from %s" % (str(assembly_fastas)))
+        with open(assembled_fasta, "w") as assembled_fd:
+            for line in fileinput.input(assembly_fastas):
+                assembled_fd.write("%s\n" % (line.strip()))
+    else:
+        workdir = "%s/%d" % (work, 0)
+        run_spades_single(intervals=selected_intervals, bam=bam, spades=spades, work=workdir, pad=pad, timeout=timeout,
+                          isize_min=isize_min, isize_max=isize_max, out_file=assembled_fasta, stop_on_fail=stop_on_fail,
+                          max_read_pairs=max_read_pairs)
 
     if os.path.getsize(assembled_fasta) > 0:
         logger.info("Indexing the assemblies")
