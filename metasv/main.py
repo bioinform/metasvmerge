@@ -264,8 +264,6 @@ def run_metasv(args):
         shutil.copy(preasm_vcf, final_vcf)
         pysam.tabix_index(final_vcf, force=True, preset="vcf")
     else:
-        logger.info("Running assembly")
-
         # this does the improved assembly location finder with softclipped reads
         if args.boost_sc:
             logger.info("Generating Soft-Clipping intervals.")
@@ -285,9 +283,9 @@ def run_metasv(args):
                                                           mean_read_coverage=args.mean_read_coverage, 
                                                           min_ins_cov_frac=args.min_ins_cov_frac,
                                                           max_ins_cov_frac=args.max_ins_cov_frac)
-            logger.info("Generated intervals for assembly in %s" % assembly_bed)
         else:
             assembly_bed = merged_bed
+        logger.info("Generated intervals for assembly in %s" % assembly_bed)
 
         if args.assembly == ASM_FULL:
             logger.info("Will run assembly now")
