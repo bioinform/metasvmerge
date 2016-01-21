@@ -292,7 +292,7 @@ def run_age_parallel(intervals_bed=None, reference=None, assembly=None, pad=AGE_
                        timeout=timeout, keep_temp=keep_temp, out_file=merged_bed,
                        min_del_subalign_len=min_del_subalign_len, min_inv_subalign_len=min_inv_subalign_len)
 
-    pybedtools.cleanup(remove_all=True)  # ATTN: why cleanup here but not at the exit of this function
+    pybedtools.cleanup(remove_all=True)
     return merged_bed
 
 

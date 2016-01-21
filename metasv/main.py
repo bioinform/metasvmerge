@@ -28,10 +28,18 @@ def create_dirs(dirlist):
             os.makedirs(dirname)
 
 
+def make_contig_whiteset(args, reference_contigs):
+    contig_whitelist = set(args.chromosomes) if args.chromosomes else set([contig.name for contig in reference_contigs])
+    if args.keep_standard_contigs:
+        contig_whitelist &= set(
+            [str(i) for i in xrange(1, 23)] + ["chr%d" % (i) for i in xrange(1, 23)] + ["X", "Y", "MT", "chrX", "chrY",
+                                                                                        "chrM"])
+    return contig_whitelist
+
+
 def run_metasv(args):
     logger.info("Running MetaSV %s" % __version__)
     logger.info("Arguments are " + str(args))
-    
     
     # Check if there is work to do
     if not (args.pindel_vcf + args.breakdancer_vcf + args.breakseq_vcf + args.cnvnator_vcf +
@@ -63,12 +71,7 @@ def run_metasv(args):
     include_intervals = sorted(
         [SVInterval(contig.name, 0, contig.length, contig.name, "include", length=contig.length) for contig in contigs])
 
-    # Generate the list of contigs to process
-    contig_whitelist = set(args.chromosomes) if args.chromosomes else set([contig.name for contig in contigs])
-    if args.keep_standard_contigs:
-        contig_whitelist &= set(
-            [str(i) for i in xrange(1, 23)] + ["chr%d" % (i) for i in xrange(1, 23)] + ["X", "Y", "MT", "chrX", "chrY",
-                                                                                        "chrM"])
+    contig_whitelist = make_contig_whiteset(args, contigs)
     logger.info("Only SVs on the following contigs will be reported: %s" % (sorted(list(contig_whitelist))))
 
     # Load the intervals from different files
@@ -304,27 +307,23 @@ def run_metasv(args):
 
 
 def asm_sc_intervals(bed=None, bam_file=None, reference=None, sample=None, contigs=None, padding=None, workdir=None,
-                     spades_exec=None, sp_opts=None, age_exec=None, age_opts=None, gt_opts=None):
-
+                     spades_exec=None, sp_opts=None, age_exec=None, age_opts=None, gt_opts=None, slicing=None):
     spades_tmpdir = os.path.join(workdir, "spades")
     age_tmpdir = os.path.join(workdir, "age")
     gt_tmpdir = os.path.join(workdir, "genotyping")
     create_dirs([spades_tmpdir, age_tmpdir, gt_tmpdir])
-
     assembled_fasta, ignored_bed = run_spades_parallel(bam=bam_file, spades=spades_exec, bed=bed, work=spades_tmpdir,
                                                        pad=padding, nthreads=sp_opts.num_threads, chrs=contigs,
                                                        max_interval_size=sp_opts.spades_max_interval_size,
                                                        svs_to_assemble=sp_opts.svs_to_assemble,
                                                        stop_on_fail=sp_opts.stop_spades_on_fail,
                                                        max_read_pairs=sp_opts.extraction_max_read_pairs,
-                                                       assembly_max_tools=sp_opts.assembly_max_tools)
-
+                                                       assembly_max_tools=sp_opts.assembly_max_tools, slicing=slicing)
     breakpoints_bed = run_age_parallel(intervals_bed=bed, reference=reference, assembly=assembled_fasta, pad=padding,
                                        age=age_exec, chrs=contigs, nthreads=age_opts.num_threads,
                                        min_contig_len=AGE_MIN_CONTIG_LENGTH,
                                        min_del_subalign_len=age_opts.min_del_subalign_len,
                                        min_inv_subalign_len=age_opts.min_inv_subalign_len, age_workdir=age_tmpdir)
-
     final_bed = os.path.join(workdir, "final.bed")
     if breakpoints_bed:
         cat_tool = pybedtools.BedTool(breakpoints_bed)
@@ -335,9 +334,22 @@ def asm_sc_intervals(bed=None, bam_file=None, reference=None, sample=None, conti
         pybedtools.BedTool(ignored_bed).sort().saveas(final_bed)
     else:
         final_bed = None
-
     genotyped_bed = parallel_genotype_intervals(final_bed, bam_file, workdir=gt_tmpdir, nthreads=gt_opts.num_threads,
                                                 chromosomes=contigs, window=gt_opts.gt_window,
                                                 isize_mean=gt_opts.isize_mean, isize_sd=gt_opts.isize_sd,
                                                 normal_frac_threshold=gt_opts.gt_normal_frac)
     return genotyped_bed
+
+
+def run_distributed_assembly(args):
+    logger.info("Starting assembly as worker %d / %d" % (args.asm_worker_id, args.asm_fleet))
+    contig_whitelist = list(make_contig_whiteset(args, get_contigs(args.reference)))
+    if not os.path.isfile(args.asm_bed):
+        logger.fatal("BED file of assembly regions does not exist: %s" % args.asm_bed)
+        return os.EX_NOINPUT
+    out_file = asm_sc_intervals(bed=args.asm_bed, bam_file=args.bam.name, reference=args.reference, sample=args.sample,
+                                contigs=contig_whitelist, padding=args.assembly_pad, workdir=args.workdir,
+                                spades_exec=args.spades, sp_opts=args, age_exec=args.age, age_opts=args, gt_opts=args,
+                                slicing=[args.asm_worker_id, args.asm_fleet])
+    logger.info("Done. Wrote genotyped BED file %s" % out_file)
+    return os.EX_OK

@@ -154,11 +154,9 @@ def add_breakpoints(interval):
 
 
 def run_spades_parallel(bam=None, spades=None, bed=None, work=None, pad=SPADES_PAD, nthreads=1, chrs=[],
-                        max_interval_size=SPADES_MAX_INTERVAL_SIZE,
-                        timeout=SPADES_TIMEOUT, isize_min=ISIZE_MIN, isize_max=ISIZE_MAX,
-                        svs_to_assemble=SVS_ASSEMBLY_SUPPORTED,
-                        stop_on_fail=False, max_read_pairs=EXTRACTION_MAX_READ_PAIRS,
-                        assembly_max_tools=ASSEMBLY_MAX_TOOLS):
+                        max_interval_size=SPADES_MAX_INTERVAL_SIZE, timeout=SPADES_TIMEOUT, isize_min=ISIZE_MIN,
+                        isize_max=ISIZE_MAX, svs_to_assemble=SVS_ASSEMBLY_SUPPORTED, stop_on_fail=False,
+                        max_read_pairs=EXTRACTION_MAX_READ_PAIRS, assembly_max_tools=ASSEMBLY_MAX_TOOLS, slicing=None):
     pybedtools.set_tempdir(work)
 
     logger.info("Running SPAdes on the intervals in %s" % bed)
@@ -171,9 +169,12 @@ def run_spades_parallel(bam=None, spades=None, bed=None, work=None, pad=SPADES_P
     chrs = set(chrs)
     all_intervals = [interval for interval in bedtool] if not chrs else [interval for interval in bedtool if
                                                                          interval.chrom in chrs]
-    # TODO: slice out the intervals to be processed by other nodes
+    if slicing is not None:
+        # For sliced execution, each worker keeps its own ignored intervals, because they are only ignored for assembly,
+        # not genotyping. Because workers also share genotyping load, slicing happens after chromosome selection but
+        # before filtering.
+        all_intervals = all_intervals[slicing[0]::slicing[1]]
 
-    # # # # # #
     selected_intervals = filter(partial(should_be_assembled, max_interval_size=max_interval_size,
                                         svs_to_assemble=svs_to_assemble, assembly_max_tools=assembly_max_tools),
                                 all_intervals)

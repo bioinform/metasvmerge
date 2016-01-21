@@ -2,7 +2,7 @@
 
 import sys
 import argparse
-from metasv.main import run_metasv
+from metasv.main import run_metasv, run_distributed_assembly
 from metasv.defaults import *
 from metasv._version import __version__
 import logging
@@ -103,12 +103,13 @@ if __name__ == "__main__":
     insertion_parser.add_argument("--min_ins_cov_frac", type=float, default=MIN_INS_COVERAGE_FRAC, help="Minimum read coverage around the insertion breakpoint.")
     insertion_parser.add_argument("--max_ins_cov_frac", type=float, default=MAX_INS_COVERAGE_FRAC, help="Maximum read coverage around the insertion breakpoint.")
 
-
-
     as_parser = parser.add_argument_group("Assembly options")
     as_parser.add_argument("--spades", help="Path to SPAdes executable", required=False)
     as_parser.add_argument("--disable_assembly", action="store_true", help="Disable assembly (deprecated)")
     as_parser.add_argument("--assembly", choices=ASM_RUN_MODES, default=ASM_FULL, help="Assembly execution plan")
+    as_parser.add_argument("--asm_fleet", help="Total number of workers used for parallel execution of assembly", type=int)
+    as_parser.add_argument("--asm_worker_id", help="Zero-based worker ID for contributing to parallel assembly", type=int)
+    as_parser.add_argument("--asm_bed", help="BED file of regions to assemble when --assembly=%s" % ASM_SLICED)
     as_parser.add_argument("--svs_to_assemble", nargs="+", help="SVs to assemble", default=SVS_ASSEMBLY_SUPPORTED,
                            choices=SVS_ASSEMBLY_SUPPORTED)
     as_parser.add_argument("--svs_to_softclip", nargs="+", help="SVs to soft-clip", default=SVS_SOFTCLIP_SUPPORTED,
@@ -152,12 +153,23 @@ if __name__ == "__main__":
 
     if args.disable_assembly:
         if args.assembly != ASM_DISABLE:
-            logger.error("Deprecated argument --disable_assembly contradicts --assembly=%s." % args.assembly)
-            sys.exit(os.EX_USAGE)
+            parser.error("Deprecated argument --disable_assembly contradicts --assembly=%s." % args.assembly)
         else:
             args.assembly = ASM_DISABLE
             logger.warn("Argument --disable_assembly is deprecated. Use --assembly=%s instead." % ASM_DISABLE)
 
     args.svs_to_assemble = set(args.svs_to_assemble) & set(args.svs_to_report)
     args.svs_to_softclip = set(args.svs_to_softclip) & set(args.svs_to_report)
-    sys.exit(run_metasv(args))
+
+    if args.assembly == ASM_SLICED:
+        if args.asm_worker_id is None:
+            parser.error("Missing argument --asm_worker_id for --assembly=%s." % ASM_SLICED)
+        if args.asm_fleet is None:
+            parser.error("Missing argument --asm_fleet for --assembly=%s." % ASM_SLICED)
+        if args.asm_bed is None:
+            parser.error("Missing argument --asm_bed for run mode --assembly=%s." % ASM_SLICED)
+        if args.asm_worker_id >= args.asm_fleet:
+            parser.error("Worker ID --asm_worker_id exceeds fleet size --asm_fleet.")
+        sys.exit(run_distributed_assembly(args))
+    else:
+        sys.exit(run_metasv(args))

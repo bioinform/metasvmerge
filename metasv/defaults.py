@@ -36,7 +36,8 @@ ISIZE_SD = 50.0
 ASM_FULL = "run"
 ASM_DEFER = "defer"
 ASM_DISABLE = "disable"
-ASM_RUN_MODES = set([ASM_FULL, ASM_DEFER, ASM_DISABLE])
+ASM_SLICED = "parallel"
+ASM_RUN_MODES = set([ASM_FULL, ASM_DEFER, ASM_DISABLE, ASM_SLICED])
 
 # For assembly read-extraction
 EXTRACTION_MAX_READ_PAIRS = 10000
