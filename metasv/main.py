@@ -298,7 +298,7 @@ def run_metasv(args):
                                              padding=args.assembly_pad, workdir=args.workdir, spades_exec=args.spades,
                                              sp_opts=args, age_exec=args.age, age_opts=args, gt_opts=args)
             logger.info("Output final VCF file")
-            convert_metasv_bed_to_vcf(bedfile=[genotyped_bed], vcf_out=final_vcf, workdir=args.workdir,
+            convert_metasv_bed_to_vcf(bedfiles=[genotyped_bed], vcf_out=final_vcf, workdir=args.workdir,
                                       sample=args.sample, pass_calls=False)
 
     logger.info("Clean up pybedtools")
