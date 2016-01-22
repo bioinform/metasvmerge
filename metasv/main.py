@@ -286,7 +286,8 @@ def run_metasv(args):
                                                           mean_read_length=args.mean_read_length,
                                                           mean_read_coverage=args.mean_read_coverage, 
                                                           min_ins_cov_frac=args.min_ins_cov_frac,
-                                                          max_ins_cov_frac=args.max_ins_cov_frac)
+                                                          max_ins_cov_frac=args.max_ins_cov_frac,
+                                                          assembly_max_tools=args.assembly_max_tools)
         else:
             assembly_bed = merged_bed
         logger.info("Generated intervals for assembly in %s" % assembly_bed)
@@ -299,12 +300,11 @@ def run_metasv(args):
                                              sp_opts=args, age_exec=args.age, age_opts=args, gt_opts=args)
             logger.info("Output final VCF file")
             convert_metasv_bed_to_vcf(bedfiles=[genotyped_bed], vcf_out=final_vcf, workdir=args.workdir,
-                                      sample=args.sample, pass_calls=False)
+                                      sample=args.sample, reference=args.reference, pass_calls=False)
 
     logger.info("Clean up pybedtools")
     pybedtools.cleanup(remove_all=True)
     logger.info("All Done!")
-
     return os.EX_OK
 
 
@@ -323,7 +323,7 @@ def asm_sc_intervals(bed=None, bam_file=None, reference=None, sample=None, conti
                                                        assembly_max_tools=sp_opts.assembly_max_tools, slicing=slicing)
     breakpoints_bed = run_age_parallel(intervals_bed=bed, reference=reference, assembly=assembled_fasta, pad=padding,
                                        age=age_exec, chrs=contigs, nthreads=age_opts.num_threads,
-                                       min_contig_len=AGE_MIN_CONTIG_LENGTH,
+                                       min_contig_len=AGE_MIN_CONTIG_LENGTH, age_window=age_opts.age_window,
                                        min_del_subalign_len=age_opts.min_del_subalign_len,
                                        min_inv_subalign_len=age_opts.min_inv_subalign_len, age_workdir=age_tmpdir)
     final_bed = os.path.join(workdir, "final.bed")
@@ -360,5 +360,5 @@ def run_distributed_assembly(args):
 def run_merge_assembly_slices(args):
     logger.info("Merging %d genotyped BED files from parallel assembly..." % len(args.asm_slices))
     convert_metasv_bed_to_vcf(bedfiles=args.asm_slices, vcf_out=canonical_result_file(args), workdir=args.workdir,
-                              sample=args.sample, pass_calls=False)
+                              sample=args.sample, reference=args.reference, pass_calls=False)
     return os.EX_OK
