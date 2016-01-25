@@ -41,7 +41,7 @@ def run_age_single(intervals_bed=None, region_list=[], contig_dict={}, reference
                    max_interval_len_truncation_age = AGE_MAX_INTERVAL_TRUNCATION,
                    dist_to_expected_bp = AGE_DIST_TO_BP, min_del_subalign_len = MIN_DEL_SUBALIGN_LENGTH, 
                    min_inv_subalign_len = MIN_INV_SUBALIGN_LENGTH, age_window = AGE_WINDOW_SIZE,
-                   age_workdir=None, timeout=AGE_TIMEOUT, keep_temp=False, myid=0):
+                   age_workdir=None, timeout=AGE_TIMEOUT, keep_temp=False, out_file=None):
     thread_logger = logging.getLogger("%s-%s" % (run_age_single.__name__, multiprocessing.current_process()))
 
     bedtools_intervals = []
@@ -49,8 +49,6 @@ def run_age_single(intervals_bed=None, region_list=[], contig_dict={}, reference
 
     assembly_fasta = pysam.Fastafile(assembly) if assembly else None
     reference_fasta = pysam.Fastafile(reference)
-
-    breakpoints_bed = None
 
     thread_logger.info("Will process %d intervals" % (len(region_list)))
 
@@ -84,9 +82,6 @@ def run_age_single(intervals_bed=None, region_list=[], contig_dict={}, reference
             thread_logger.info("Writing the ref sequence for region %s" % region_name)
             with open(ref_name, "w") as file_handle:
                 file_handle.write(">{}.ref\n{}".format(region_name, reference_sequence))
-
-
-            
 
             age_records = []
             thread_logger.info("Processing %d contigs for region %s" % (len(contig_dict[region]), str(region_object)))
@@ -203,10 +198,9 @@ def run_age_single(intervals_bed=None, region_list=[], contig_dict={}, reference
 
     thread_logger.info("Writing %d intervals" % (len(bedtools_intervals)))
     if bedtools_intervals:
-        breakpoints_bed = os.path.join(age_workdir, "%d_breakpoints.bed" % myid)
-        pybedtools.BedTool(bedtools_intervals).saveas(breakpoints_bed)
+        pybedtools.BedTool(bedtools_intervals).saveas(out_file)
 
-    return breakpoints_bed
+    return out_file
 
 
 def run_age_single_callback(result, result_list):
@@ -265,43 +259,43 @@ def run_age_parallel(intervals_bed=None, reference=None, assembly=None, pad=AGE_
         func_logger.warning("AGE not run since no contigs found")
         return None
 
-    func_logger.info("Will process %d regions with %d contigs (%d small contigs ignored) using %d threads" % (
-        len(region_list), sum([len(value) for value in contig_dict.values()]), small_contigs_count, nthreads))
-
+    merged_bed = os.path.join(age_workdir, "breakpoints.bed")
     pybedtools.set_tempdir(age_workdir)
-    pool = multiprocessing.Pool(nthreads)
+    if nthreads > 1:
+        func_logger.info("Will process %d regions with %d contigs (%d small contigs ignored) using %d threads ..." % (
+            len(region_list), sum([len(value) for value in contig_dict.values()]), small_contigs_count, nthreads))
+        breakpoints_beds = []
+        pool = multiprocessing.Pool(nthreads)
+        for i in xrange(nthreads):
+            region_sublist = [region for (j, region) in enumerate(region_list) if (j % nthreads) == i]
+            out_file = os.path.join(age_workdir, "%d_breakpoints.bed" % i)
+            kwargs_dict = {"intervals_bed": intervals_bed, "region_list": region_sublist, "contig_dict": contig_dict,
+                           "reference": reference, "assembly": assembly, "pad": pad, "age": age,
+                           "age_workdir": age_workdir, "timeout": timeout, "keep_temp": keep_temp, "out_file": out_file,
+                           "min_del_subalign_len": min_del_subalign_len, "min_inv_subalign_len": min_inv_subalign_len,
+                           "age_window" : age_window}
+            pool.apply_async(run_age_single, args=[], kwds=kwargs_dict,
+                             callback=partial(run_age_single_callback, result_list=breakpoints_beds))
+        pool.close()
+        pool.join()
+        func_logger.info("... Finished. Now merging the following breakpoints beds %s" % (str(breakpoints_beds)))
 
-    breakpoints_beds = []
-    for i in xrange(nthreads):
-        region_sublist = [region for (j, region) in enumerate(region_list) if (j % nthreads) == i]
-        kwargs_dict = {"intervals_bed": intervals_bed, "region_list": region_sublist, "contig_dict": contig_dict,
-                       "reference": reference, "assembly": assembly, "pad": pad, "age": age, "age_workdir": age_workdir,
-                       "timeout": timeout, "keep_temp": keep_temp, "myid": i, 
-                       "min_del_subalign_len": min_del_subalign_len, "min_inv_subalign_len": min_inv_subalign_len,
-                       "age_window" : age_window}
-        pool.apply_async(run_age_single, args=[], kwds=kwargs_dict,
-                         callback=partial(run_age_single_callback, result_list=breakpoints_beds))
+        if breakpoints_beds:
+            bedtool = pybedtools.BedTool(breakpoints_beds[0])
+            for bed_file in breakpoints_beds[1:]:
+                bedtool = bedtool.cat(pybedtools.BedTool(bed_file), postmerge=False)
 
-    pool.close()
-    pool.join()
-
-    func_logger.info("Finished parallel execution")
-
-    func_logger.info("Will merge the following breakpoints beds %s" % (str(breakpoints_beds)))
+            bedtool = bedtool.moveto(os.path.join(age_workdir, "breakpoints_unsorted.bed"))
+            bedtool.sort().saveas(merged_bed)
+        else:
+            merged_bed = None
+    else:
+        run_age_single(intervals_bed=intervals_bed, region_list=region_list, contig_dict=contig_dict,
+                       reference=reference, assembly=assembly, pad=pad, age=age, age_workdir=age_workdir,
+                       timeout=timeout, keep_temp=keep_temp, out_file=merged_bed, age_window=age_window,
+                       min_del_subalign_len=min_del_subalign_len, min_inv_subalign_len=min_inv_subalign_len)
 
     pybedtools.cleanup(remove_all=True)
-
-    if not breakpoints_beds:
-        return None
-
-    bedtool = pybedtools.BedTool(breakpoints_beds[0])
-    for bed_file in breakpoints_beds[1:]:
-        bedtool = bedtool.cat(pybedtools.BedTool(bed_file), postmerge=False)
-
-    bedtool = bedtool.moveto(os.path.join(age_workdir, "breakpoints_unsorted.bed"))
-    merged_bed = os.path.join(age_workdir, "breakpoints.bed")
-    bedtool.sort().saveas(merged_bed)
-
     return merged_bed
 
 

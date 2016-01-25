@@ -419,14 +419,14 @@ def resolve_for_IDP_ITX_CTX(vcf_records,fasta_file,pad=0,wiggle=10,overlap_ratio
 
 
 
-def convert_metasv_bed_to_vcf(bedfile=None, vcf_out=None, workdir=None, vcf_template_file=vcf_template, sample=None, reference=None,
+def convert_metasv_bed_to_vcf(bedfiles=[], vcf_out=None, workdir=None, vcf_template_file=vcf_template, sample=None, reference=None,
                               pass_calls=True):
     func_logger = logging.getLogger("%s" % (convert_metasv_bed_to_vcf.__name__))
     if not os.path.exists(workdir):
         os.makedirs(workdir)
 
     intervals = []
-    if bedfile:
+    for bedfile in bedfiles:
     
         for interval in pybedtools.BedTool(bedfile):
             interval_info = get_interval_info(interval,pass_calls)            
@@ -516,7 +516,7 @@ if __name__ == "__main__":
                                      formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
     parser.add_argument("--sample", help="Sample name", required=True)
-    parser.add_argument("--bed", help="MetaSV final BED", required=True)
+    parser.add_argument("--bed", help="MetaSV final BED", nargs="+")
     parser.add_argument("--vcf", help="Final VCF to output", required=True)
     parser.add_argument("--vcf_template", help="VCF template", default=vcf_template)
     parser.add_argument("--reference", help="Reference FASTA")
@@ -525,6 +525,6 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    convert_metasv_bed_to_vcf(bedfile=args.bed, vcf_out=args.vcf, workdir=args.work, vcf_template_file=args.vcf_template,
-                              sample=args.sample,
-                              reference=args.reference, pass_calls=args.pass_only)
+    convert_metasv_bed_to_vcf(bedfiles=args.bed, vcf_out=args.vcf, workdir=args.work,
+                              vcf_template_file=args.vcf_template, sample=args.sample, reference=args.reference,
+                              pass_calls=args.pass_only)
