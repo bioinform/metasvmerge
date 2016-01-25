@@ -52,7 +52,7 @@ def run_metasv(args):
         logger.warning("Nothing to merge since no SV file specified")
 
     # Simple check for arguments
-    if not args.disable_assembly:
+    if args.assembly == ASM_FULL:
         if not args.spades:
             logger.error("Spades executable not specified")
             return os.EX_USAGE
