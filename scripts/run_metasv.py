@@ -2,9 +2,14 @@
 
 import sys
 import argparse
-from metasv.main import run_metasv
+from metasv.main import run_metasv, run_distributed_assembly, run_merge_assembly_slices
 from metasv.defaults import *
 from metasv._version import __version__
+import logging
+
+FORMAT = '%(levelname)s %(asctime)-15s %(name)-20s %(message)s'
+logging.basicConfig(level=logging.INFO, format=FORMAT)
+logger = logging.getLogger(__name__)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Merge SVs from multiple tools for accurate SV calling",
@@ -86,13 +91,16 @@ if __name__ == "__main__":
     insertion_parser.add_argument("--min_ins_cov_frac", type=float, default=MIN_INS_COVERAGE_FRAC, help="Minimum read coverage around the insertion breakpoint.")
     insertion_parser.add_argument("--max_ins_cov_frac", type=float, default=MAX_INS_COVERAGE_FRAC, help="Maximum read coverage around the insertion breakpoint.")
 
-
-
     as_parser = parser.add_argument_group("Assembly options")
-    as_parser.add_argument("--spades", help="Path to SPAdes executable")
+    as_parser.add_argument("--spades", help="Path to SPAdes executable", required=False)
     as_parser.add_argument("--spades_options", help="Options for SPAdes", default="")
     as_parser.add_argument("--spades_timeout", help="Maximum time (in seconds) for running SPAdes on an interval", default=SPADES_TIMEOUT, type=int)
-    as_parser.add_argument("--disable_assembly", action="store_true", help="Disable assembly")
+    as_parser.add_argument("--disable_assembly", action="store_true", help="Disable assembly (deprecated)")
+    as_parser.add_argument("--assembly", choices=ASM_RUN_MODES, default=ASM_FULL, help="Assembly execution plan")
+    as_parser.add_argument("--asm_fleet", help="Total number of workers used for parallel execution of assembly", type=int)
+    as_parser.add_argument("--asm_worker_id", help="Zero-based worker ID for contributing to parallel assembly", type=int)
+    as_parser.add_argument("--asm_bed", help="BED file of regions to assemble when --assembly=%s" % ASM_SLICED)
+    as_parser.add_argument("--asm_slices", help="Genotyped BED slices to be merged into final VCF.", nargs="+", default=[])
     as_parser.add_argument("--svs_to_assemble", nargs="+", help="SVs to assemble", default=SVS_ASSEMBLY_SUPPORTED,
                            choices=SVS_ASSEMBLY_SUPPORTED)
     as_parser.add_argument("--svs_to_softclip", nargs="+", help="SVs to soft-clip", default=SVS_SOFTCLIP_SUPPORTED,
@@ -137,6 +145,29 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    if args.disable_assembly:
+        if args.assembly != ASM_DISABLE:
+            parser.error("Deprecated argument --disable_assembly contradicts --assembly=%s." % args.assembly)
+        else:
+            args.assembly = ASM_DISABLE
+            logger.warn("Argument --disable_assembly is deprecated. Use --assembly=%s instead." % ASM_DISABLE)
+
     args.svs_to_assemble = set(args.svs_to_assemble) & set(args.svs_to_report)
     args.svs_to_softclip = set(args.svs_to_softclip) & set(args.svs_to_report)
-    sys.exit(run_metasv(args))
+
+    if args.assembly == ASM_SLICED:
+        if args.asm_worker_id is None:
+            parser.error("Missing argument --asm_worker_id for --assembly=%s." % ASM_SLICED)
+        if args.asm_fleet is None:
+            parser.error("Missing argument --asm_fleet for --assembly=%s." % ASM_SLICED)
+        if args.asm_bed is None:
+            parser.error("Missing argument --asm_bed for run mode --assembly=%s." % ASM_SLICED)
+        if args.asm_worker_id >= args.asm_fleet:
+            parser.error("Worker ID --asm_worker_id exceeds fleet size --asm_fleet.")
+        sys.exit(run_distributed_assembly(args))
+    elif args.assembly == ASM_MERGE:
+        if not args.asm_slices:
+            parser.error("No input BED files specified by --asm_slices for --assembly=%s" % ASM_MERGE)
+        sys.exit(run_merge_assembly_slices(args))
+    else:
+        sys.exit(run_metasv(args))

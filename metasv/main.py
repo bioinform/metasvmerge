@@ -28,11 +28,24 @@ def create_dirs(dirlist):
             os.makedirs(dirname)
 
 
+def make_contig_whiteset(args, reference_contigs):
+    contig_whitelist = set(args.chromosomes) if args.chromosomes else set([contig.name for contig in reference_contigs])
+    if args.keep_standard_contigs:
+        contig_whitelist &= set(
+            [str(i) for i in xrange(1, 23)] + ["chr%d" % (i) for i in xrange(1, 23)] + ["X", "Y", "MT", "chrX", "chrY",
+                                                                                        "chrM"])
+    return contig_whitelist
+
+
+def canonical_result_file(args):
+    return os.path.join(args.outdir, "variants.vcf")
+
+
 def run_metasv(args):
     logger.info("Running MetaSV %s" % __version__)
     logger.info("Arguments are " + str(args))
-    
-    
+
+
     # Check if there is work to do
     if not (args.pindel_vcf + args.breakdancer_vcf + args.breakseq_vcf + args.cnvnator_vcf +
             args.pindel_native + args.breakdancer_native + args.breakseq_native + args.cnvnator_native +
@@ -40,7 +53,7 @@ def run_metasv(args):
         logger.warning("Nothing to merge since no SV file specified")
 
     # Simple check for arguments
-    if not args.disable_assembly:
+    if args.assembly == ASM_FULL:
         if not args.spades:
             logger.error("Spades executable not specified")
             return os.EX_USAGE
@@ -63,12 +76,7 @@ def run_metasv(args):
     include_intervals = sorted(
         [SVInterval(contig.name, 0, contig.length, contig.name, "include", length=contig.length) for contig in contigs])
 
-    # Generate the list of contigs to process
-    contig_whitelist = set(args.chromosomes) if args.chromosomes else set([contig.name for contig in contigs])
-    if args.keep_standard_contigs:
-        contig_whitelist &= set(
-            [str(i) for i in xrange(1, 23)] + ["chr%d" % (i) for i in xrange(1, 23)] + ["X", "Y", "MT", "chrX", "chrY",
-                                                                                        "chrM"])
+    contig_whitelist = make_contig_whiteset(args, contigs)
     logger.info("Only SVs on the following contigs will be reported: %s" % (sorted(list(contig_whitelist))))
 
     # Load the intervals from different files
@@ -254,19 +262,13 @@ def run_metasv(args):
     for key in sorted(final_stats.keys()):
         logger.info(str(key) + ":" + str(final_stats[key]))
 
-    final_vcf = os.path.join(args.outdir, "variants.vcf")
+    final_vcf = canonical_result_file(args)
 
     # Run assembly here
-    if not args.disable_assembly:
-        logger.info("Running assembly")
-
-        spades_tmpdir = os.path.join(args.workdir, "spades")
-        age_tmpdir = os.path.join(args.workdir, "age")
-
-        create_dirs([spades_tmpdir, age_tmpdir])
-
-        assembly_bed = merged_bed
-
+    if args.assembly == ASM_DISABLE:
+        shutil.copy(preasm_vcf, final_vcf)
+        pysam.tabix_index(final_vcf, force=True, preset="vcf")
+    else:
         # this does the improved assembly location finder with softclipped reads
         if args.boost_sc:
             logger.info("Generating Soft-Clipping intervals.")
@@ -287,60 +289,79 @@ def run_metasv(args):
                                                           min_ins_cov_frac=args.min_ins_cov_frac,
                                                           max_ins_cov_frac=args.max_ins_cov_frac,
                                                           assembly_max_tools=args.assembly_max_tools)
-            logger.info("Generated intervals for assembly in %s" % assembly_bed)
-
-        logger.info("Will run assembly now")
-
-        assembled_fasta, ignored_bed = run_spades_parallel(bams=args.bams, spades=args.spades, spades_options=args.spades_options, bed=assembly_bed,
-                                                           work=spades_tmpdir, pad=args.assembly_pad,
-                                                           nthreads=args.num_threads,
-                                                           chrs=list(contig_whitelist),
-                                                           max_interval_size=args.spades_max_interval_size,
-                                                           timeout=args.spades_timeout,
-                                                           svs_to_assemble=args.svs_to_assemble,
-                                                           stop_on_fail=args.stop_spades_on_fail,
-                                                           max_read_pairs=args.extraction_max_read_pairs,
-                                                           assembly_max_tools=args.assembly_max_tools)
-        breakpoints_bed = run_age_parallel(intervals_bed=assembly_bed, reference=args.reference,
-                                           assembly=assembled_fasta,
-                                           pad=args.assembly_pad, age=args.age, timeout=args.age_timeout, chrs=list(contig_whitelist),
-                                           nthreads=args.num_threads,
-                                           min_contig_len=AGE_MIN_CONTIG_LENGTH, min_del_subalign_len=args.min_del_subalign_len,
-                                           min_inv_subalign_len=args.min_inv_subalign_len,
-                                           age_window=args.age_window,
-                                           age_workdir=age_tmpdir)
-
-        final_bed = os.path.join(args.workdir, "final.bed")
-        if breakpoints_bed:
-            if ignored_bed:
-                pybedtools.BedTool(breakpoints_bed) \
-                    .cat(pybedtools.BedTool(ignored_bed), postmerge=False) \
-                    .sort().saveas(final_bed)
-            else:
-                pybedtools.BedTool(breakpoints_bed).saveas(final_bed)
-        elif ignored_bed:
-            pybedtools.BedTool(ignored_bed).sort().saveas(final_bed)
         else:
-            final_bed = None
+            assembly_bed = merged_bed
+        logger.info("Generated intervals for assembly in %s" % assembly_bed)
 
-        genotyped_bed = parallel_genotype_intervals(final_bed, args.bams,
-                                                    workdir=os.path.join(args.workdir, "genotyping"),
-                                                    nthreads=args.num_threads, chromosomes=list(contig_whitelist),
-                                                    window=args.gt_window, isize_mean=args.isize_mean,
-                                                    isize_sd=args.isize_sd,
-                                                    normal_frac_threshold=args.gt_normal_frac)
-
-        logger.info("Output final VCF file")
-
-        convert_metasv_bed_to_vcf(bedfile=genotyped_bed, vcf_out=final_vcf, workdir=args.workdir, sample=args.sample, reference=args.reference, pass_calls=False)
-    else:
-        shutil.copy(preasm_vcf, final_vcf)
-        pysam.tabix_index(final_vcf, force=True, preset="vcf")
+        if args.assembly == ASM_FULL:
+            logger.info("Will run assembly now")
+            genotyped_bed = asm_sc_intervals(bed=assembly_bed, bam_files=args.bams, reference=args.reference,
+                                             sample=args.sample, contigs=list(contig_whitelist),
+                                             padding=args.assembly_pad, workdir=args.workdir, spades_exec=args.spades,
+                                             sp_opts=args, age_exec=args.age, age_opts=args, gt_opts=args)
+            logger.info("Output final VCF file")
+            convert_metasv_bed_to_vcf(bedfiles=[genotyped_bed], vcf_out=final_vcf, workdir=args.workdir,
+                                      sample=args.sample, reference=args.reference, pass_calls=False)
 
     logger.info("Clean up pybedtools")
-
     pybedtools.cleanup(remove_all=True)
-
     logger.info("All Done!")
+    return os.EX_OK
 
+
+def asm_sc_intervals(bed=None, bam_files=[], reference=None, sample=None, contigs=None, padding=None, workdir=None,
+                     spades_exec=None, sp_opts=None, age_exec=None, age_opts=None, gt_opts=None, slicing=None):
+    spades_tmpdir = os.path.join(workdir, "spades")
+    age_tmpdir = os.path.join(workdir, "age")
+    gt_tmpdir = os.path.join(workdir, "genotyping")
+    create_dirs([spades_tmpdir, age_tmpdir, gt_tmpdir])
+    assembled_fasta, ignored_bed = run_spades_parallel(bams=bam_files, spades=spades_exec, bed=bed, work=spades_tmpdir,
+                                                       spades_options=sp_opts.spades_options,
+                                                       timeout=sp_opts.spades_timeout, pad=padding,
+                                                       nthreads=sp_opts.num_threads, chrs=contigs,
+                                                       max_interval_size=sp_opts.spades_max_interval_size,
+                                                       svs_to_assemble=sp_opts.svs_to_assemble,
+                                                       stop_on_fail=sp_opts.stop_spades_on_fail,
+                                                       max_read_pairs=sp_opts.extraction_max_read_pairs,
+                                                       assembly_max_tools=sp_opts.assembly_max_tools, slicing=slicing)
+    breakpoints_bed = run_age_parallel(intervals_bed=bed, reference=reference, assembly=assembled_fasta, pad=padding,
+                                       age=age_exec, chrs=contigs, nthreads=age_opts.num_threads,
+                                       min_contig_len=AGE_MIN_CONTIG_LENGTH, age_window=age_opts.age_window,
+                                       min_del_subalign_len=age_opts.min_del_subalign_len, timeout=age_opts.age_timeout,
+                                       min_inv_subalign_len=age_opts.min_inv_subalign_len, age_workdir=age_tmpdir)
+    final_bed = os.path.join(workdir, "final.bed")
+    if breakpoints_bed:
+        cat_tool = pybedtools.BedTool(breakpoints_bed)
+        if ignored_bed:
+            cat_tool = cat_tool.cat(pybedtools.BedTool(ignored_bed), postmerge=False).sort()
+        cat_tool.saveas(final_bed)
+    elif ignored_bed:
+        pybedtools.BedTool(ignored_bed).sort().saveas(final_bed)
+    else:
+        final_bed = None
+    genotyped_bed = parallel_genotype_intervals(final_bed, bam_files, workdir=gt_tmpdir, nthreads=gt_opts.num_threads,
+                                                chromosomes=contigs, window=gt_opts.gt_window,
+                                                isize_mean=gt_opts.isize_mean, isize_sd=gt_opts.isize_sd,
+                                                normal_frac_threshold=gt_opts.gt_normal_frac)
+    return genotyped_bed
+
+
+def run_distributed_assembly(args):
+    logger.info("Starting assembly as worker %d / %d" % (args.asm_worker_id, args.asm_fleet))
+    contig_whitelist = list(make_contig_whiteset(args, get_contigs(args.reference)))
+    if not os.path.isfile(args.asm_bed):
+        logger.fatal("BED file of assembly regions does not exist: %s" % args.asm_bed)
+        return os.EX_NOINPUT
+    out_file = asm_sc_intervals(bed=args.asm_bed, bam_files=args.bams, reference=args.reference, sample=args.sample,
+                                contigs=contig_whitelist, padding=args.assembly_pad, workdir=args.workdir,
+                                spades_exec=args.spades, sp_opts=args, age_exec=args.age, age_opts=args, gt_opts=args,
+                                slicing=[args.asm_worker_id, args.asm_fleet])
+    logger.info("Done. Wrote genotyped BED file %s" % out_file)
+    return os.EX_OK
+
+
+def run_merge_assembly_slices(args):
+    logger.info("Merging %d genotyped BED files from parallel assembly..." % len(args.asm_slices))
+    convert_metasv_bed_to_vcf(bedfiles=args.asm_slices, vcf_out=canonical_result_file(args), workdir=args.workdir,
+                              sample=args.sample, reference=args.reference, pass_calls=False)
     return os.EX_OK

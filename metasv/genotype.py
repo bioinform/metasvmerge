@@ -109,7 +109,7 @@ def genotype_intervals_callback(result, result_list):
 
 
 def genotype_intervals(intervals_file=None, bams=[], workdir=None, window=GT_WINDOW, isize_mean=ISIZE_MEAN,
-                       isize_sd=ISIZE_SD, normal_frac_threshold=GT_NORMAL_FRAC):
+                       isize_sd=ISIZE_SD, normal_frac_threshold=GT_NORMAL_FRAC, out_file=None):
     func_logger = logging.getLogger("%s-%s" % (genotype_intervals.__name__, multiprocessing.current_process()))
 
     if workdir and not os.path.isdir(workdir):
@@ -133,16 +133,14 @@ def genotype_intervals(intervals_file=None, bams=[], workdir=None, window=GT_WIN
             genotyped_intervals.append(pybedtools.create_interval_from_list(fields))
         for bam_handle in bam_handles:
             bam_handle.close()
-        bedtool = pybedtools.BedTool(genotyped_intervals).moveto(os.path.join(workdir, "genotyped.bed"))
+        bedtool = pybedtools.BedTool(genotyped_intervals).moveto(out_file)
     except Exception as e:
         func_logger.error('Caught exception in worker thread')
-
-        # This prints the type, value, and stack trace of the
-        # current exception being handled.
         traceback.print_exc()
 
         print()
         raise e
+
     func_logger.info(
         "Genotyped %d intervals in %g minutes" % (len(genotyped_intervals), (time.time() - start_time) / 60.0))
 
@@ -165,45 +163,52 @@ def parallel_genotype_intervals(intervals_file=None, bams=[], workdir=None, nthr
 
     start_time = time.time()
 
+    out_file = os.path.join(workdir, "genotyped.bed")
     bedtool = pybedtools.BedTool(intervals_file)
     selected_intervals = [interval for interval in bedtool if not chromosomes or interval.chrom in chromosomes]
     nthreads = min(len(selected_intervals), nthreads)
     intervals_per_process = (len(selected_intervals) + nthreads - 1) / nthreads
 
-    pool = multiprocessing.Pool(nthreads)
-    genotyped_beds = []
-    for i in xrange(nthreads):
-        process_workdir = os.path.join(workdir, str(i))
-        if not os.path.isdir(process_workdir):
-            os.makedirs(process_workdir)
-        process_intervals = pybedtools.BedTool(
-            selected_intervals[i * intervals_per_process: (i + 1) * intervals_per_process]).saveas(
-            os.path.join(process_workdir, "ungenotyped.bed"))
-        kwargs_dict = {"intervals_file": process_intervals.fn, "bams": bams, "workdir": process_workdir, "window": window,
-                       "isize_mean": isize_mean, "isize_sd": isize_sd, "normal_frac_threshold": normal_frac_threshold}
-        pool.apply_async(genotype_intervals, kwds=kwargs_dict,
-                         callback=partial(genotype_intervals_callback, result_list=genotyped_beds))
+    if nthreads > 1:
+        pool = multiprocessing.Pool(nthreads)
+        genotyped_beds = []
+        for i in xrange(nthreads):
+            process_workdir = os.path.join(workdir, str(i))
+            if not os.path.isdir(process_workdir):
+                os.makedirs(process_workdir)
+            proc_out_file = os.path.join(process_workdir, "genotyped.bed")
+            process_intervals = pybedtools.BedTool(
+                selected_intervals[i * intervals_per_process: (i + 1) * intervals_per_process]).saveas(
+                os.path.join(process_workdir, "ungenotyped.bed"))
+            kwargs_dict = {"intervals_file": process_intervals.fn, "bams": bams, "workdir": process_workdir,
+                           "window": window, "isize_mean": isize_mean, "isize_sd": isize_sd, "out_file": proc_out_file,
+                           "normal_frac_threshold": normal_frac_threshold}
+            pool.apply_async(genotype_intervals, kwds=kwargs_dict,
+                             callback=partial(genotype_intervals_callback, result_list=genotyped_beds))
 
-    pool.close()
-    pool.join()
+        pool.close()
+        pool.join()
 
-    func_logger.info("Following BED files will be merged: %s" % (str(genotyped_beds)))
+        if not genotyped_beds:
+            func_logger.warn("No intervals generated")
+            return None
 
-    if not genotyped_beds:
-        func_logger.warn("No intervals generated")
-        return None
+        func_logger.info("Following BED files will be merged: %s" % (str(genotyped_beds)))
+        pybedtools.set_tempdir(workdir)
+        bedtool = pybedtools.BedTool(genotyped_beds[0])
+        for bed_file in genotyped_beds[1:]:
+            bedtool = bedtool.cat(pybedtools.BedTool(bed_file), postmerge=False)
+        genotyped_bed = bedtool.sort().moveto(out_file).fn
 
-    pybedtools.set_tempdir(workdir)
-    bedtool = pybedtools.BedTool(genotyped_beds[0])
+    else:
+        process_workdir = os.path.join(workdir, str(0))
+        genotyped_bed = genotype_intervals(selected_intervals=selected_intervals, bam=bams, workdir=process_workdir,
+                                           window=window, isize_mean=isize_mean, isize_sd=isize_sd, out_file=out_file,
+                                           normal_frac_threshold=normal_frac_threshold, nthreads=1)
 
-    for bed_file in genotyped_beds[1:]:
-        bedtool = bedtool.cat(pybedtools.BedTool(bed_file), postmerge=False)
-    bedtool = bedtool.sort().moveto(os.path.join(workdir, "genotyped.bed"))
-
-    func_logger.info("Finished parallel genotyping of %d intervals in %g minutes" % (
-    len(selected_intervals), (time.time() - start_time) / 60.0))
-
-    return bedtool.fn
+    func_logger.info("Finished genotyping %d intervals in %g minutes" % (len(selected_intervals),
+                                                                         (time.time() - start_time) / 60.0))
+    return genotyped_bed
 
 
 if __name__ == "__main__":
