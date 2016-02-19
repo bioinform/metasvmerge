@@ -110,13 +110,12 @@ def run_metasv(args):
         for native_file in nativename:
             for record in svReader(native_file, svs_to_report=args.svs_to_report):
                 interval = record.to_sv_interval()
+                if not interval:
+                    # This is the case for SVs we want to skip
+                    continue
                 BD_min_inv_len = args.mean_read_length+4*args.isize_sd
                 if toolname=="BreakDancer" and interval.sv_type == "INV" and  abs(interval.length)< BD_min_inv_len:
                     #Filter BreakDancer artifact INVs with size < readlength+4*isize_sd
-                    continue
-
-                if not interval:
-                    # This is the case for SVs we want to skip
                     continue
                 if not interval_overlaps_interval_list(interval, gap_intervals) and interval.chrom in contig_whitelist:
                     
@@ -271,7 +270,7 @@ def run_metasv(args):
         # this does the improved assembly location finder with softclipped reads
         if args.boost_sc:
             logger.info("Generating Soft-Clipping intervals.")
-            assembly_bed = parallel_generate_sc_intervals([args.bam.name], list(contig_whitelist), merged_bed,
+            assembly_bed = parallel_generate_sc_intervals(args.bams, list(contig_whitelist), merged_bed,
                                                           args.workdir,
                                                           num_threads=args.num_threads,
                                                           min_support_ins=args.min_support_ins,
@@ -294,7 +293,7 @@ def run_metasv(args):
 
         if args.assembly == ASM_FULL:
             logger.info("Will run assembly now")
-            genotyped_bed = asm_sc_intervals(bed=assembly_bed, bam_file=args.bam.name, reference=args.reference,
+            genotyped_bed = asm_sc_intervals(bed=assembly_bed, bam_files=args.bams, reference=args.reference,
                                              sample=args.sample, contigs=list(contig_whitelist),
                                              padding=args.assembly_pad, workdir=args.workdir, spades_exec=args.spades,
                                              sp_opts=args, age_exec=args.age, age_opts=args, gt_opts=args)
@@ -308,13 +307,13 @@ def run_metasv(args):
     return os.EX_OK
 
 
-def asm_sc_intervals(bed=None, bam_file=None, reference=None, sample=None, contigs=None, padding=None, workdir=None,
+def asm_sc_intervals(bed=None, bam_files=[], reference=None, sample=None, contigs=None, padding=None, workdir=None,
                      spades_exec=None, sp_opts=None, age_exec=None, age_opts=None, gt_opts=None, slicing=None):
     spades_tmpdir = os.path.join(workdir, "spades")
     age_tmpdir = os.path.join(workdir, "age")
     gt_tmpdir = os.path.join(workdir, "genotyping")
     create_dirs([spades_tmpdir, age_tmpdir, gt_tmpdir])
-    assembled_fasta, ignored_bed = run_spades_parallel(bam=bam_file, spades=spades_exec, bed=bed, work=spades_tmpdir,
+    assembled_fasta, ignored_bed = run_spades_parallel(bams=bam_files, spades=spades_exec, bed=bed, work=spades_tmpdir,
                                                        spades_options=sp_opts.spades_options,
                                                        timeout=sp_opts.spades_timeout, pad=padding,
                                                        nthreads=sp_opts.num_threads, chrs=contigs,
@@ -338,7 +337,7 @@ def asm_sc_intervals(bed=None, bam_file=None, reference=None, sample=None, conti
         pybedtools.BedTool(ignored_bed).sort().saveas(final_bed)
     else:
         final_bed = None
-    genotyped_bed = parallel_genotype_intervals(final_bed, bam_file, workdir=gt_tmpdir, nthreads=gt_opts.num_threads,
+    genotyped_bed = parallel_genotype_intervals(final_bed, bam_files, workdir=gt_tmpdir, nthreads=gt_opts.num_threads,
                                                 chromosomes=contigs, window=gt_opts.gt_window,
                                                 isize_mean=gt_opts.isize_mean, isize_sd=gt_opts.isize_sd,
                                                 normal_frac_threshold=gt_opts.gt_normal_frac)
@@ -351,7 +350,7 @@ def run_distributed_assembly(args):
     if not os.path.isfile(args.asm_bed):
         logger.fatal("BED file of assembly regions does not exist: %s" % args.asm_bed)
         return os.EX_NOINPUT
-    out_file = asm_sc_intervals(bed=args.asm_bed, bam_file=args.bam.name, reference=args.reference, sample=args.sample,
+    out_file = asm_sc_intervals(bed=args.asm_bed, bam_files=args.bams, reference=args.reference, sample=args.sample,
                                 contigs=contig_whitelist, padding=args.assembly_pad, workdir=args.workdir,
                                 spades_exec=args.spades, sp_opts=args, age_exec=args.age, age_opts=args, gt_opts=args,
                                 slicing=[args.asm_worker_id, args.asm_fleet])
