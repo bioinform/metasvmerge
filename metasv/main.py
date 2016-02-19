@@ -44,7 +44,8 @@ def canonical_result_file(args):
 def run_metasv(args):
     logger.info("Running MetaSV %s" % __version__)
     logger.info("Arguments are " + str(args))
-    
+
+
     # Check if there is work to do
     if not (args.pindel_vcf + args.breakdancer_vcf + args.breakseq_vcf + args.cnvnator_vcf +
             args.pindel_native + args.breakdancer_native + args.breakseq_native + args.cnvnator_native +
@@ -195,6 +196,7 @@ def run_metasv(args):
             vcf_writer.close()
             logger.info("Indexing single tool VCF for %s" % (str(toolname)))
             pysam.tabix_index(tool_out, force=True, preset="vcf")
+
 
     # Do merging here
     logger.info("Do merging")

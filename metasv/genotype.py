@@ -108,14 +108,15 @@ def genotype_intervals_callback(result, result_list):
         result_list.append(result)
 
 
-def genotype_intervals(intervals_file=None, bams=[], workdir=None, window=GT_WINDOW, out_file=None,
-                       isize_mean=ISIZE_MEAN, isize_sd=ISIZE_SD, normal_frac_threshold=GT_NORMAL_FRAC):
+def genotype_intervals(intervals_file=None, bams=[], workdir=None, window=GT_WINDOW, isize_mean=ISIZE_MEAN,
+                       isize_sd=ISIZE_SD, normal_frac_threshold=GT_NORMAL_FRAC, out_file=None):
     func_logger = logging.getLogger("%s-%s" % (genotype_intervals.__name__, multiprocessing.current_process()))
 
-    if not os.path.isdir(workdir):
+    if workdir and not os.path.isdir(workdir):
         os.makedirs(workdir)
 
     pybedtools.set_tempdir(workdir)
+
     genotyped_intervals = []
     start_time = time.time()
 
@@ -136,11 +137,13 @@ def genotype_intervals(intervals_file=None, bams=[], workdir=None, window=GT_WIN
     except Exception as e:
         func_logger.error('Caught exception in worker thread')
         traceback.print_exc()
+
         print()
         raise e
 
     func_logger.info(
         "Genotyped %d intervals in %g minutes" % (len(genotyped_intervals), (time.time() - start_time) / 60.0))
+
     return bedtool.fn
 
 
@@ -157,7 +160,9 @@ def parallel_genotype_intervals(intervals_file=None, bams=[], workdir=None, nthr
         os.makedirs(workdir)
 
     chromosomes = set(chromosomes)
+
     start_time = time.time()
+
     out_file = os.path.join(workdir, "genotyped.bed")
     bedtool = pybedtools.BedTool(intervals_file)
     selected_intervals = [interval for interval in bedtool if not chromosomes or interval.chrom in chromosomes]

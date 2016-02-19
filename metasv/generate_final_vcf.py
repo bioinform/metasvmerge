@@ -527,6 +527,6 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    convert_metasv_bed_to_vcf(bedfiles=args.bed, vcf_out=args.vcf, workdir=args.work,
-                              vcf_template_file=args.vcf_template, sample=args.sample, reference=args.reference,
-                              pass_calls=args.pass_only)
+    convert_metasv_bed_to_vcf(bedfiles=args.bed, vcf_out=args.vcf, workdir=args.work, vcf_template_file=args.vcf_template,
+                              sample=args.sample,
+                              reference=args.reference, pass_calls=args.pass_only)

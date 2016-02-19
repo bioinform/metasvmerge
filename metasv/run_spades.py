@@ -109,6 +109,7 @@ def run_spades_single_callback(result, result_list):
 
 def should_be_assembled(interval, max_interval_size=SPADES_MAX_INTERVAL_SIZE,
                         svs_to_assemble=SVS_ASSEMBLY_SUPPORTED, assembly_max_tools=ASSEMBLY_MAX_TOOLS):
+
     name_fields = interval.name.split(",")
     max_interval_size_sv = max_interval_size if "INS" in name_fields[1] else SPADES_MAX_INTERVAL_SIZE_2BP
 
@@ -135,7 +136,8 @@ def should_be_assembled(interval, max_interval_size=SPADES_MAX_INTERVAL_SIZE,
     
     if "SC" in methods:
         methods.discard("SC")
-        num_tools -= 1 
+        num_tools -= 1
+
 
     return  num_tools <= assembly_max_tools or not (methods & precise_methods)
     
