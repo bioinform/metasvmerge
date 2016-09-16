@@ -12,9 +12,9 @@ import json
 import base64
 
 svs_of_interest = ["DEL", "INS", "DUP", "DUP:TANDEM", "INV", "ITX", "CTX"]
-sv_sources = ["Pindel", "BreakSeq", "HaplotypeCaller", "BreakDancer", "CNVnator",
+sv_sources = ["Pindel", "BreakSeq", "SoftClip", "HaplotypeCaller", "BreakDancer", "CNVnator",
               "Manta", "Lumpy", "WHAM", "CNVkit"]  # order is important!
-precise_sv_sources = ["Pindel", "BreakSeq", "HaplotypeCaller", "SoftClip"]
+precise_sv_sources = ["Pindel", "BreakSeq", "SoftClip", "HaplotypeCaller",]
 sv_sources_to_type = {"Pindel": ["SR"], "BreakSeq": ["JM"], "BreakDancer": ["RP"],
                       "CNVnator": ["RD"], "HaplotypeCaller": ["AS"],
                       "Manta": ["SR", "RP"], "Lumpy": ["SR", "RP"], "CNVkit": ["RD"],
@@ -195,6 +195,21 @@ class SVInterval:
                 self.start = mid
                 self.end = mid
 
+    def fix_precise_coords(self):
+        if self.sub_intervals:
+            sourc_to_subinterval = {}
+            for i,interval in enumerate(self.sub_intervals):
+                for source in interval.sources:
+                    if source not in sourc_to_subinterval:
+                        sourc_to_subinterval[source] = []
+                    sourc_to_subinterval[source].append(i)
+            for precise_tool in precise_sv_sources:
+                if precise_tool not in sourc_to_subinterval:
+                    continue
+                self.start = self.sub_intervals[sourc_to_subinterval[precise_tool][0]].start
+                self.end = self.sub_intervals[sourc_to_subinterval[precise_tool][0]].end
+                break
+
     def get_info(self):
         temp_info = {}
         if not self.sub_intervals:
@@ -312,6 +327,9 @@ class SVInterval:
         return "%s\t%d\t%d\t%d\t%d\t%s\t%d\t%s\t%s\t%s\t%s\tMetaSV\t%d" % (
             self.chrom, start_outer, start_inner, end_inner, end_outer, self.sv_type, self.length, "BWA", "Illumina",
             sample_name, type_of_computational_approach, id_num)
+
+
+
 
 
 def interval_overlaps_interval_list(interval, interval_list, min_fraction_self=1e-9, min_fraction_other=1e-9):

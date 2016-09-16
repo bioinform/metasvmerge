@@ -130,7 +130,7 @@ def load_intervals(in_vcf, intervals={}, gap_intervals=[], include_intervals=[],
             # Handle broken header if SVLEN is reported as an array
             svlen = abs(vcf_record.INFO["SVLEN"]) if isinstance(vcf_record.INFO["SVLEN"], int) else abs(
                 vcf_record.INFO["SVLEN"][0])
-            if svlen < minsvlen:
+            if 0 < svlen < minsvlen or (sv_type==0 and sv_type!="INS"):
                 logger.warn("Skipping " + str(vcf_record) + " due to small size")
                 continue
             if svlen > maxsvlen:

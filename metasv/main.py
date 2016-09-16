@@ -9,6 +9,7 @@ from pindel_reader import PindelReader
 from breakdancer_reader import BreakDancerReader
 from breakseq_reader import BreakSeqReader
 from cnvnator_reader import CNVnatorReader
+from softclip_reader import SoftClipReader
 from generate_sv_intervals import parallel_generate_sc_intervals
 from run_spades import run_spades_parallel
 from age import run_age_parallel
@@ -82,7 +83,8 @@ def run_metasv(args):
     native_name_list = [("CNVnator", args.cnvnator_native, CNVnatorReader),
                         ("Pindel", args.pindel_native, PindelReader),
                         ("BreakSeq", args.breakseq_native, BreakSeqReader),
-                        ("BreakDancer", args.breakdancer_native, BreakDancerReader)]
+                        ("BreakDancer", args.breakdancer_native, BreakDancerReader),
+                        ("SoftClip", args.softclip_native, SoftClipReader)]
 
     tools = []
     intervals = {}
@@ -115,8 +117,12 @@ def run_metasv(args):
                 if not interval_overlaps_interval_list(interval, gap_intervals) and interval.chrom in contig_whitelist:
                     
                     # Check length
-                    if interval.length < args.minsvlen and interval.sv_type not in  ["ITX", "CTX"]:
+                    if abs(interval.length) < args.minsvlen and interval.sv_type not in  ["INS", "ITX", "CTX"]:
                         continue
+
+                    if 0 < abs(interval.length) < args.minsvlen and interval.sv_type == "INS":
+                        continue
+
 
                     # Set wiggle
                     if interval.sv_type not in ["ITX","CTX"]:
@@ -126,6 +132,7 @@ def run_metasv(args):
                     
                     intervals[toolname][interval.sv_type].append(interval)
         sv_types |= set(intervals[toolname].keys())
+
 
     # Handles the VCF input cases, we will just deal with these cases
     logger.info("Load VCF files")
@@ -215,8 +222,9 @@ def run_metasv(args):
     final_chr_intervals = {contig.name: [] for contig in contigs}
     for interval in final_intervals:
         interval.do_validation(args.overlap_ratio)
+        interval.fix_precise_coords()
         interval.fix_pos()
-        if args.minsvlen <= interval.length <= args.maxsvlen or interval.sv_type in ["ITX", "CTX"]:
+        if args.minsvlen <= abs(interval.length) <= args.maxsvlen or interval.sv_type in ["ITX", "CTX"] or (interval.length==0 and interval.sv_type == "INS"):
             final_chr_intervals[interval.chrom].append(interval)
 
     # This is the merged VCF without assembly, ok for deletions at this point
@@ -269,28 +277,6 @@ def run_metasv(args):
 
         assembly_bed = merged_bed
 
-        # this does the improved assembly location finder with softclipped reads
-        if args.boost_sc:
-            logger.info("Generating Soft-Clipping intervals.")
-            assembly_bed = parallel_generate_sc_intervals(args.bams, list(contig_whitelist), merged_bed,
-                                                          args.workdir,
-                                                          num_threads=args.num_threads,
-                                                          min_support_ins=args.min_support_ins,
-                                                          min_support_frac_ins=args.min_support_frac_ins,
-                                                          max_intervals=args.max_ins_intervals, min_mapq=args.min_mapq,
-                                                          min_avg_base_qual=args.min_avg_base_qual,
-                                                          min_soft_clip=args.min_soft_clip,
-                                                          max_nm=args.max_nm, min_matches=args.min_matches,
-                                                          isize_mean=args.isize_mean, isize_sd=args.isize_sd,                                                        
-                                                          svs_to_softclip=args.svs_to_softclip,
-                                                          overlap_ratio=args.overlap_ratio,
-                                                          mean_read_length=args.mean_read_length,
-                                                          mean_read_coverage=args.mean_read_coverage, 
-                                                          min_ins_cov_frac=args.min_ins_cov_frac,
-                                                          max_ins_cov_frac=args.max_ins_cov_frac,
-                                                          assembly_max_tools=args.assembly_max_tools,
-                                                          other_scale=args.sc_other_scale)
-            logger.info("Generated intervals for assembly in %s" % assembly_bed)
 
         logger.info("Will run assembly now")
 

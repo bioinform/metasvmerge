@@ -28,6 +28,8 @@ if __name__ == "__main__":
                               help="VCF file or dir for CNVnator VCFs", default=[])
     input_parser.add_argument("--cnvnator_native", nargs="+", metavar="File list", help="CNVnator native files",
                               default=[])
+    input_parser.add_argument("--softclip_native", nargs="+", metavar="File list", help="SoftClip native files",
+                              default=[])
     input_parser.add_argument("--gatk_vcf", nargs="+", metavar="file", help="VCF file or dir for gatk VCFs",
                               default=[])
     input_parser.add_argument("--manta_vcf", nargs="+", help="VCF file or dir for Manta VCFs",
@@ -132,6 +134,7 @@ if __name__ == "__main__":
     work_parser.add_argument("--workdir", help="Scratch directory for working", default="work")
     work_parser.add_argument("--num_threads", help="Number of threads to use", type=int, default=1)
     work_parser.add_argument("--outdir", help="Output directory", required=True)
+    work_parser.add_argument("--restart_step", help="Step from where to restart", choices=STEPS, default=STEP_LOAD)
 
     other_parser = parser.add_argument_group("Other options")
     other_parser.add_argument('--version', action='version', version='%(prog)s ' + __version__)
