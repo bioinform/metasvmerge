@@ -47,6 +47,8 @@ class SoftClipRecord:
             "SC_COVERAGE": self.coverage,
             "SC_FRAC_DISCORDANT_SUPPORT": self.frac_discordant_support,
         }
+        if "IMPRECISE" in info_fields: 
+            self.info["SC_IMPRECISE"]="."   
 
     def __str__(self):
         return str(self.__dict__)

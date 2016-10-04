@@ -221,14 +221,19 @@ def run_age_parallel(intervals_bed=None, reference=None, assembly=None, pad=AGE_
                      min_contig_len=AGE_MIN_CONTIG_LENGTH,
                      max_region_len=AGE_MAX_REGION_LENGTH, sv_types=[], 
                      min_del_subalign_len=MIN_DEL_SUBALIGN_LENGTH, min_inv_subalign_len=MIN_INV_SUBALIGN_LENGTH,
-                     age_window = AGE_WINDOW_SIZE):
+                     age_window = AGE_WINDOW_SIZE, enabled=True):
     func_logger = logging.getLogger("%s-%s" % (run_age_parallel.__name__, multiprocessing.current_process()))
 
     if not os.path.isdir(age_workdir):
         func_logger.info("Creating %s" % age_workdir)
         os.makedirs(age_workdir)
 
-    if assembly:
+    if not enabled:
+        merged_bed = os.path.join(age_workdir, "breakpoints.bed")
+        func_logger.info("Skipped AGE alignment STEP. Will use %s"%merged_bed)
+        return merged_bed
+    
+    if assembly and os.path.isfile(assembly):
         if not os.path.isfile("%s.fai" % assembly):
             func_logger.info("Assembly FASTA wasn't indexed. Will attempt to index now.")
             pysam.faidx(assembly)

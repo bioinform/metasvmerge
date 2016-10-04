@@ -19,7 +19,7 @@ FORMAT = '%(levelname)s %(asctime)-15s %(name)-20s %(message)s'
 logging.basicConfig(level=logging.INFO, format=FORMAT)
 logger = logging.getLogger(__name__)
 
-precise_methods = set(["AS", "SR", "JM"])
+precise_methods = set(["AS", "SR", "JM", "SC"])
 
 
 def append_contigs(src, interval, dst_fd, fn_id=0, sv_type="INS"):
@@ -132,15 +132,23 @@ def should_be_assembled(interval, max_interval_size=SPADES_MAX_INTERVAL_SIZE,
     methods = set(name_fields[3].split(";"))
     num_tools = int(info.get("NUM_SVTOOLS", 1))
     
-    if (("DUP" in name_fields[1]) or ("DEL" in name_fields[1]) or ("INS" in name_fields[1])) and (not "SC" in methods):
-        return False
+#     if (("DUP" in name_fields[1]) or ("DEL" in name_fields[1]) or ("INS" in name_fields[1])) and (not "SC" in methods):
+#         return False
+#     
+#     if "SC" in methods:
+#         methods.discard("SC")
+#         num_tools -= 1 
+#     
+    my_precise_methods = set(precise_methods)
     
-    if "SC" in methods:
-        methods.discard("SC")
+    if "DUP" in name_fields[1]:
+        my_precise_methods.discard("SR")        
+    
+    if "INS" in name_fields[1] and "RP" in methods:
+        methods.discard("RP")
         num_tools -= 1 
-    
 
-    return  num_tools <= assembly_max_tools or not (methods & precise_methods)
+    return  num_tools <= assembly_max_tools or not (methods & my_precise_methods)
     
 
 def shouldnt_be_assembled(interval, max_interval_size=SPADES_MAX_INTERVAL_SIZE,
@@ -168,7 +176,14 @@ def run_spades_parallel(bams=[], spades=None, spades_options="", bed=None, work=
                         timeout=SPADES_TIMEOUT, isize_min=ISIZE_MIN, isize_max=ISIZE_MAX,
                         svs_to_assemble=SVS_ASSEMBLY_SUPPORTED,
                         stop_on_fail=False, max_read_pairs=EXTRACTION_MAX_READ_PAIRS,
-                        assembly_max_tools=ASSEMBLY_MAX_TOOLS):
+                        assembly_max_tools=ASSEMBLY_MAX_TOOLS, enabled = True):
+
+    if not enabled:
+        assembled_fasta = os.path.join(work, "spades_assembled.fa")
+        ignored_bed = os.path.join(work, "ignored.bed")
+        logger.info("Skipped  SPAdes assembly STEP. Will use %s and %s"%(assembled_fasta,ignored_bed))
+        return assembled_fasta, ignored_bed
+
     pybedtools.set_tempdir(work)
 
     logger.info("Running SPAdes on the intervals in %s" % bed)
@@ -190,6 +205,12 @@ def run_spades_parallel(bams=[], spades=None, spades_options="", bed=None, work=
 
     logger.info("%d intervals selected" % len(selected_intervals))
     logger.info("%d intervals ignored" % len(ignored_intervals))
+
+    ignored_bed = None
+    if ignored_intervals:
+        ignored_bed = os.path.join(work, "ignored.bed")
+        pybedtools.BedTool(ignored_intervals).each(add_breakpoints).saveas(ignored_bed)
+
 
     nthreads = min(len(selected_intervals), nthreads)
 
@@ -222,10 +243,6 @@ def run_spades_parallel(bams=[], spades=None, spades_options="", bed=None, work=
     else:
         logger.warn("No intervals for assembly.")
 
-    ignored_bed = None
-    if ignored_intervals:
-        ignored_bed = os.path.join(work, "ignored.bed")
-        pybedtools.BedTool(ignored_intervals).each(add_breakpoints).saveas(ignored_bed)
 
     pybedtools.cleanup(remove_all=True)
 

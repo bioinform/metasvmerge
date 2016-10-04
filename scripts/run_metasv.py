@@ -68,29 +68,6 @@ if __name__ == "__main__":
                                 type=int)
     merging_parser.add_argument("--overlap_ratio", help="Reciprocal overlap ratio", default=OVERLAP_RATIO, type=float)
 
-    sc_parser = parser.add_argument_group("Soft-clip detection options")
-    sc_parser.add_argument("--min_avg_base_qual", help="Minimum average base quality",
-                                  default=SC_MIN_AVG_BASE_QUAL, type=int)
-    sc_parser.add_argument("--min_mapq", help="Minimum MAPQ", default=SC_MIN_MAPQ, type=int)
-    sc_parser.add_argument("--min_soft_clip", help="Minimum soft-clip", default=SC_MIN_SOFT_CLIP, type=int)
-    sc_parser.add_argument("--max_nm", help="Maximum number of edits", default=SC_MAX_NM, type=int)
-    sc_parser.add_argument("--min_matches", help="Mininum number of matches", default=SC_MIN_MATCHES, type=int)
-    sc_parser.add_argument("--min_support_ins",
-                                  help="Minimum read support for calling insertions using soft-clips (including neighbors)",
-                                  type=int, default=MIN_SUPPORT_INS)
-    sc_parser.add_argument("--min_support_frac_ins",
-                                  help="Minimum fraction of reads supporting insertion using soft-clips (including neighbors)", type=float,
-                                  default=MIN_SUPPORT_FRAC_INS)
-    sc_parser.add_argument("--max_ins_intervals", help="Maximum number of insertion intervals to generate",
-                                  type=int,
-                                  default=MAX_INTERVALS)
-    sc_parser.add_argument("--mean_read_coverage", type=float, default=MEAN_READ_COVERAGE, help="Mean read coverage")
-    sc_parser.add_argument("--min_ins_cov_frac", type=float, default=MIN_INS_COVERAGE_FRAC, help="Minimum read coverage around the insertion breakpoint.")
-    sc_parser.add_argument("--max_ins_cov_frac", type=float, default=MAX_INS_COVERAGE_FRAC, help="Maximum read coverage around the insertion breakpoint.")
-    sc_parser.add_argument("--sc_other_scale", type=float, default=SC_OTHER_SCALE, help="Control degree of incorporation of breakpoints from other methods.")
-
-
-
     as_parser = parser.add_argument_group("Assembly options")
     as_parser.add_argument("--spades", help="Path to SPAdes executable")
     as_parser.add_argument("--spades_options", help="Options for SPAdes", default="")
@@ -98,8 +75,6 @@ if __name__ == "__main__":
     as_parser.add_argument("--disable_assembly", action="store_true", help="Disable assembly")
     as_parser.add_argument("--svs_to_assemble", nargs="+", help="SVs to assemble", default=["INS", "INV", "DUP"],
                            choices=SVS_ASSEMBLY_SUPPORTED)
-    as_parser.add_argument("--svs_to_softclip", nargs="+", help="SVs to soft-clip", default=["INS", "INV", "DUP"],
-                           choices=SVS_SOFTCLIP_SUPPORTED)
     as_parser.add_argument("--extraction_max_read_pairs", type=int, default=EXTRACTION_MAX_READ_PAIRS,
                            help="Maximum number of pairs to extract for assembly")
     as_parser.add_argument("--spades_max_interval_size", type=int, default=SPADES_MAX_INTERVAL_SIZE,
@@ -117,8 +92,7 @@ if __name__ == "__main__":
                         default=MIN_DEL_SUBALIGN_LENGTH)
     as_parser.add_argument("--age_window", help="Window size for AGE to merge nearby breakpoints", type=int,
                         default=AGE_WINDOW_SIZE)
-    as_parser.add_argument("--boost_sc", help="Use soft-clips for improving breakpoint detection",
-                                  action="store_true")
+
     gt_parser = parser.add_argument_group("Genotyping options")
     gt_parser.add_argument("--gt_window", type=int, default=GT_WINDOW, help="Window for genotyping")
     gt_parser.add_argument("--gt_normal_frac", type=float, default=GT_NORMAL_FRAC,
@@ -142,5 +116,4 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     args.svs_to_assemble = set(args.svs_to_assemble) & set(args.svs_to_report)
-    args.svs_to_softclip = set(args.svs_to_softclip) & set(args.svs_to_report)
     sys.exit(run_metasv(args))

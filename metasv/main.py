@@ -1,10 +1,9 @@
-from collections import defaultdict
 import shutil
 import sys
 
 from defaults import *
 from vcf_utils import *
-from sv_interval import SVInterval, get_gaps_file, interval_overlaps_interval_list, merge_intervals, merge_intervals_recursively
+from sv_interval import SVInterval, get_gaps_file
 from pindel_reader import PindelReader
 from breakdancer_reader import BreakDancerReader
 from breakseq_reader import BreakSeqReader
@@ -16,6 +15,7 @@ from age import run_age_parallel
 from generate_final_vcf import convert_metasv_bed_to_vcf
 from fasta_utils import get_contigs
 from genotype import parallel_genotype_intervals
+from process_sv_calls import load_sv_callers_files,merge_sv_callers_files
 from _version import __version__
 
 FORMAT = '%(levelname)s %(asctime)-15s %(name)-20s %(message)s'
@@ -52,6 +52,10 @@ def run_metasv(args):
             logger.error("AGE executable not specified")
             return os.EX_USAGE
 
+    
+    enable_flags = ENABLE_FLAGS[args.restart_step]
+
+    
     # Create the directories for working
     bedtools_tmpdir = os.path.join(args.workdir, "bedtools")
     create_dirs([args.workdir, args.outdir, bedtools_tmpdir])
@@ -86,186 +90,26 @@ def run_metasv(args):
                         ("BreakDancer", args.breakdancer_native, BreakDancerReader),
                         ("SoftClip", args.softclip_native, SoftClipReader)]
 
-    tools = []
-    intervals = {}
-    sv_types = set()
 
     gap_intervals = []
     if args.filter_gaps:
         gaps = args.gaps if args.gaps else get_gaps_file(contig_whitelist)
         gap_intervals = sorted(load_gap_intervals(gaps))
 
-    # Handles native input
-    logger.info("Load native files")
-    for toolname, nativename, svReader in native_name_list:
-        # If no native file is given, ignore the tool
-        if not nativename: continue
+    loaded_pickle = load_sv_callers_files(native_name_list=native_name_list, vcf_name_list=vcf_name_list,
+                                          workdir=args.workdir, outdir=args.outdir, sample=args.sample,
+                                          contigs=contigs, fasta_handle=fasta_handle, mean_read_length=args.mean_read_length, isize_sd=args.isize_sd,
+                                          gap_intervals=gap_intervals, contig_whitelist=contig_whitelist, include_intervals=include_intervals,
+                                          wiggle=args.wiggle, inswiggle=args.inswiggle, svs_to_report=args.svs_to_report, overlap_ratio=args.overlap_ratio,
+                                          minsvlen=args.minsvlen, maxsvlen=args.maxsvlen, 
+                                          enable_per_tool_output=args.enable_per_tool_output, enabled=enable_flags[STEP_LOAD])
 
-        tools.append(toolname)
-        intervals[toolname] = defaultdict(list)
-
-        for native_file in nativename:
-            for record in svReader(native_file, svs_to_report=args.svs_to_report):
-                interval = record.to_sv_interval()
-                if not interval:
-                    # This is the case for SVs we want to skip
-                    continue
-                BD_min_inv_len = args.mean_read_length+4*args.isize_sd
-                if toolname=="BreakDancer" and interval.sv_type == "INV" and  abs(interval.length)< BD_min_inv_len:
-                    #Filter BreakDancer artifact INVs with size < readlength+4*isize_sd
-                    continue
-                if not interval_overlaps_interval_list(interval, gap_intervals) and interval.chrom in contig_whitelist:
-                    
-                    # Check length
-                    if abs(interval.length) < args.minsvlen and interval.sv_type not in  ["INS", "ITX", "CTX"]:
-                        continue
-
-                    if 0 < abs(interval.length) < args.minsvlen and interval.sv_type == "INS":
-                        continue
-
-
-                    # Set wiggle
-                    if interval.sv_type not in ["ITX","CTX"]:
-                        interval.wiggle = max(args.inswiggle if interval.sv_type == "INS" else 0, args.wiggle)
-                    else:
-                        interval.wiggle = TX_WIGGLE
-                    
-                    intervals[toolname][interval.sv_type].append(interval)
-        sv_types |= set(intervals[toolname].keys())
-
-
-    # Handles the VCF input cases, we will just deal with these cases
-    logger.info("Load VCF files")
-    for toolname, vcfname in vcf_name_list:
-        # If no VCF is given, ignore the tool
-        if not vcfname:
-            continue
-
-        tools.append(toolname)
-        intervals[toolname] = {}
-
-        vcf_list = []
-        for vcffile in vcfname:
-            if os.path.isdir(vcffile):
-                logger.info("Will load from per-chromosome VCFs from directory %s for tool %s" % (vcffile, toolname))
-                vcf_list += [os.path.join(vcffile, "%s.vcf.gz" % contig.name) for contig in contigs if
-                             (not contig_whitelist or contig.name in contig_whitelist)]
-            else:
-                vcf_list.append(vcffile)
-
-        for vcffile in vcf_list:
-            load_intervals(vcffile, intervals[toolname], gap_intervals, include_intervals, toolname, contig_whitelist,
-                           minsvlen=args.minsvlen, wiggle=args.wiggle, inswiggle=args.inswiggle,
-                           svs_to_report=args.svs_to_report, maxsvlen=args.maxsvlen)
-        sv_types |= set(intervals[toolname].keys())
-
-    logger.info("SV types are %s" % (str(sv_types)))
-    tool_merged_intervals = {}
-    final_intervals = []
-
-    # This will just output per-tool VCFs, no intra-tool merging is done yet
-    if args.enable_per_tool_output:
-        logger.info("Output per-tool VCFs")
-        for toolname in intervals:
-            tool_out = os.path.join(args.outdir, "%s.vcf" % (toolname.lower()))
-
-            logger.info("Outputting single tool VCF for %s" % (str(toolname)))
-            vcf_template_reader = vcf.Reader(open(os.path.join(mydir, "resources/template.vcf"), "r"))
-            vcf_template_reader.samples = [args.sample]
-
-            intervals_tool = []
-            tool_out_fd = open(tool_out, "w")
-            vcf_writer = vcf.Writer(tool_out_fd, vcf_template_reader)
-            chr_intervals_tool = {contig.name: [] for contig in contigs}
-            for sv_type in sv_types:
-                if sv_type in intervals[toolname]:
-                    intervals_tool.extend([copy.deepcopy(interval) for interval in intervals[toolname][sv_type]])
-            for interval in intervals_tool:
-                # Marghoob says that this is just to fill-in some metadata
-                interval.do_validation(args.overlap_ratio)
-
-                interval.fix_pos()
-                chr_intervals_tool[interval.chrom].append(interval)
-
-            for contig in contigs:
-                chr_intervals_tool[contig.name].sort()
-                for interval in chr_intervals_tool[contig.name]:
-                    vcf_record = interval.to_vcf_record(fasta_handle, args.sample)
-                    if vcf_record is not None:
-                        vcf_writer.write_record(vcf_record)
-            tool_out_fd.close()
-            vcf_writer.close()
-            logger.info("Indexing single tool VCF for %s" % (str(toolname)))
-            pysam.tabix_index(tool_out, force=True, preset="vcf")
-
-
-    # Do merging here
-    logger.info("Do merging")
-    for sv_type in sv_types:
-        logger.info("Processing SVs of type %s" % sv_type)
-        tool_merged_intervals[sv_type] = []
-
-        # Do the intra-tool merging
-        logger.info("Intra-tool Merging SVs of type %s" % sv_type)
-        for tool in tools:
-            logger.debug("Is %s in tool keys? %s" % (sv_type, str(intervals[tool].keys())))
-            if sv_type not in intervals[tool]:
-                logger.debug("%s not in tool %s" % (sv_type, tool))
-                continue
-            logger.info("First level merging for %s for tool %s" % (sv_type, tool))
-            tool_merged_intervals[sv_type] += merge_intervals(intervals[tool][sv_type])
-
-        # Do the inter-tool merging
-        logger.info("Inter-tool Merging SVs of type %s" % sv_type)
-        final_intervals.extend(merge_intervals_recursively(tool_merged_intervals[sv_type],args.overlap_ratio))
-
-    final_chr_intervals = {contig.name: [] for contig in contigs}
-    for interval in final_intervals:
-        interval.do_validation(args.overlap_ratio)
-        interval.fix_precise_coords()
-        interval.fix_pos()
-        if args.minsvlen <= abs(interval.length) <= args.maxsvlen or interval.sv_type in ["ITX", "CTX"] or (interval.length==0 and interval.sv_type == "INS"):
-            final_chr_intervals[interval.chrom].append(interval)
-
-    # This is the merged VCF without assembly, ok for deletions at this point
-    logger.info("Output merged VCF without assembly ")
-    vcf_template_reader = vcf.Reader(open(os.path.join(mydir, "resources/template.vcf"), "r"))
-    vcf_template_reader.samples = [args.sample]
-    preasm_vcf = os.path.join(args.workdir, "pre_asm.vcf")
-    vcf_fd = open(preasm_vcf, "w")
-    vcf_writer = vcf.Writer(vcf_fd, vcf_template_reader)
-
-    final_stats = {}
-
-    bed_intervals = []
-    for contig in contigs:
-        final_chr_intervals[contig.name].sort()
-        for interval in final_chr_intervals[contig.name]:
-            vcf_record = interval.to_vcf_record(fasta_handle)
-            if vcf_record is not None:
-                key = (interval.sv_type, "PASS" if interval.is_validated else "LowQual",
-                       "PRECISE" if interval.is_precise else "IMPRECISE", tuple(sorted(list(interval.sources))))
-                if key not in final_stats:
-                    final_stats[key] = 0
-                final_stats[key] += 1
-                vcf_writer.write_record(vcf_record)
-            bed_interval = interval.to_bed_interval(args.sample)
-            if bed_interval is not None:
-                bed_intervals.append(bed_interval)
-    vcf_fd.close()
-    vcf_writer.close()
-
-    # Also save a BED file representation of the merged variants without assembly
-    merged_bed = None
-    if bed_intervals:
-        merged_bed = os.path.join(args.workdir, "metasv.bed")
-        pybedtools.BedTool(bed_intervals).saveas(merged_bed)
-
-    for key in sorted(final_stats.keys()):
-        logger.info(str(key) + ":" + str(final_stats[key]))
+    merged_bed, preasm_vcf = merge_sv_callers_files(loaded_pickle=loaded_pickle, sample=args.sample, 
+                                                    workdir=args.workdir, contigs=contigs, fasta_handle=fasta_handle, overlap_ratio=args.overlap_ratio, 
+                                                    minsvlen=args.minsvlen, maxsvlen=args.maxsvlen,
+                                                    enabled=enable_flags[STEP_MERGE])
 
     final_vcf = os.path.join(args.outdir, "variants.vcf")
-
     # Run assembly here
     if not args.disable_assembly:
         logger.info("Running assembly")
@@ -276,7 +120,6 @@ def run_metasv(args):
         create_dirs([spades_tmpdir, age_tmpdir])
 
         assembly_bed = merged_bed
-
 
         logger.info("Will run assembly now")
 
@@ -289,7 +132,7 @@ def run_metasv(args):
                                                            svs_to_assemble=args.svs_to_assemble,
                                                            stop_on_fail=args.stop_spades_on_fail,
                                                            max_read_pairs=args.extraction_max_read_pairs,
-                                                           assembly_max_tools=args.assembly_max_tools)
+                                                           assembly_max_tools=args.assembly_max_tools, enabled=enable_flags[STEP_SPADES_ASSEMBLY])
         breakpoints_bed = run_age_parallel(intervals_bed=assembly_bed, reference=args.reference,
                                            assembly=assembled_fasta,
                                            pad=args.assembly_pad, age=args.age, timeout=args.age_timeout, chrs=list(contig_whitelist),
@@ -297,7 +140,7 @@ def run_metasv(args):
                                            min_contig_len=AGE_MIN_CONTIG_LENGTH, min_del_subalign_len=args.min_del_subalign_len,
                                            min_inv_subalign_len=args.min_inv_subalign_len,
                                            age_window=args.age_window,
-                                           age_workdir=age_tmpdir)
+                                           age_workdir=age_tmpdir, enabled=enable_flags[STEP_AGE_ALIGNMENT])
 
         final_bed = os.path.join(args.workdir, "final.bed")
         if breakpoints_bed:
@@ -317,11 +160,14 @@ def run_metasv(args):
                                                     nthreads=args.num_threads, chromosomes=list(contig_whitelist),
                                                     window=args.gt_window, isize_mean=args.isize_mean,
                                                     isize_sd=args.isize_sd,
-                                                    normal_frac_threshold=args.gt_normal_frac)
+                                                    normal_frac_threshold=args.gt_normal_frac, 
+                                                    enabled=enable_flags[STEP_GENOTYPE])
 
         logger.info("Output final VCF file")
 
-        convert_metasv_bed_to_vcf(bedfile=genotyped_bed, vcf_out=final_vcf, workdir=args.workdir, sample=args.sample, reference=args.reference, pass_calls=False)
+        convert_metasv_bed_to_vcf(bedfile=genotyped_bed, vcf_out=final_vcf, workdir=args.workdir, 
+                                  sample=args.sample, reference=args.reference, pass_calls=False, 
+                                  enabled =enable_flags[STEP_GEN_VCF])
     else:
         shutil.copy(preasm_vcf, final_vcf)
         pysam.tabix_index(final_vcf, force=True, preset="vcf")
