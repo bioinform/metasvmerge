@@ -10,6 +10,7 @@ import pybedtools
 import vcf
 import json
 import base64
+import itertools
 
 svs_of_interest = ["DEL", "INS", "DUP", "DUP:TANDEM", "INV", "ITX", "CTX"]
 sv_sources = ["Pindel", "BreakSeq", "SoftClip", "HaplotypeCaller", "BreakDancer", "CNVnator",
@@ -76,6 +77,28 @@ class SVInterval:
         self.sub_intervals = [interval1, interval2]
         self.sources = interval1.sources | interval2.sources
         self.gt = interval1.gt
+
+    def set_merged_all(self, intervals):
+        self.chrom = intervals[0].chrom
+        self.start = min(map(lambda x:x.start, intervals))
+        self.end = max(map(lambda x:x.end, intervals))
+        self.length = max(map(lambda x: x.length, intervals))
+        self.name = ",".join(map(lambda x:x.name,intervals))
+        self.sv_type = intervals[0].sv_type
+        self.info = None
+        sub_intervals=[]
+        for interval in intervals:
+            if interval.sub_intervals:
+                sub_intervals.extend(interval.sub_intervals)
+            else:
+                sub_intervals.append(interval)
+        self.sub_intervals = sub_intervals
+        sources=set([])
+        for interval in intervals:
+            sources |= interval.sources
+        self.sources = sources
+        self.gt = intervals[0].gt
+
 
     def __lt__(self, other):
         if self.chrom != other.chrom: return self.chrom < other.chrom
@@ -311,6 +334,17 @@ class SVInterval:
             ";".join(self._get_svmethods())),
             score=str(len(self.sources)))
 
+    def to_cluster_bed_interval(self, sample_name, interval_id, padding):
+        if self.start <= 0:
+            return None
+        if self.start==self.end:
+            end = self.end + 1
+        else:
+            end = self.end
+        
+        return pybedtools.Interval(self.chrom, max(0,self.start - padding) , end + padding, name="%s" % (interval_id))
+
+
     def to_svp_record(self, sample_name, id_num):
         if self.start <= 0:
             return None
@@ -329,7 +363,27 @@ class SVInterval:
             sample_name, type_of_computational_approach, id_num)
 
 
+def merge_clustered_intervals(cluster_bedtool, intervals, sorted_by_cluster_id=False):
 
+    sorted_intervals = sorted(cluster_bedtool, key=lambda x: int(x.fields[-1])) if not sorted_by_cluster_id else cluster_bedtool
+    cluster = []
+    merged_intervals = []
+    cluster_id=0
+    for interval in itertools.chain.from_iterable([sorted_intervals, [None]]):
+        if cluster and (not interval or cluster_id != interval.fields[-1]):
+            if len(cluster)==1:
+                merged_intervals.extend(cluster)
+            else:
+                new_merged_interval = SVInterval()
+                new_merged_interval.set_merged_all(cluster)
+                merged_intervals.append(new_merged_interval)
+            cluster = []
+        if interval:
+            cluster_id = interval.fields[-1]
+            interval_id = int(interval.name)
+            cluster.append(intervals[interval_id])
+
+    return merged_intervals
 
 
 def interval_overlaps_interval_list(interval, interval_list, min_fraction_self=1e-9, min_fraction_other=1e-9):
@@ -341,6 +395,7 @@ def interval_overlaps_interval_list(interval, interval_list, min_fraction_self=1
                                                         min_overlap_length_self=1, min_overlap_length_other=1):
         return True
     return False
+
 
 
 def merge_intervals(interval_list):

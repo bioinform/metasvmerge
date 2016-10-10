@@ -106,7 +106,7 @@ def run_metasv(args):
 
     merged_bed, preasm_vcf = merge_sv_callers_files(loaded_pickle=loaded_pickle, sample=args.sample, 
                                                     workdir=args.workdir, contigs=contigs, fasta_handle=fasta_handle, overlap_ratio=args.overlap_ratio, 
-                                                    minsvlen=args.minsvlen, maxsvlen=args.maxsvlen,
+                                                    minsvlen=args.minsvlen, maxsvlen=args.maxsvlen, wiggle=args.wiggle, inswiggle=args.inswiggle,
                                                     enabled=enable_flags[STEP_MERGE])
 
     final_vcf = os.path.join(args.outdir, "variants.vcf")

@@ -16,7 +16,7 @@ class SoftClipRecord:
         self.name = tool_name
         info_fields = vcf_record.INFO
         self.chromosome = vcf_record.CHROM
-        self.start = vcf_record.start
+        self.start = vcf_record.POS
         self.end = info_fields["END"]
         self.score = info_fields["FRAC_DISCORDANT_SUPPORT"]
         self.filter = "LowQual" if "LowQual" in vcf_record.FILTER else "PASS"
