@@ -122,15 +122,27 @@ def load_intervals(in_vcf, intervals={}, gap_intervals=[], include_intervals=[],
 
             sv_type = vcf_record.INFO["SVTYPE"]
             if sv_type == "DUP:TANDEM": sv_type = "DUP"
+            if sv_type == "TRA" or sv_type == "BND":
+                if vcf_record.CHROM == vcf_record.INFO["CHR2"]:
+                    sv_type = "ITX"
+                elif vcf_record.CHROM != vcf_record.INFO["CHR2"]:
+                    sv_type == "CTX"
             if "SVLEN" not in vcf_record.INFO:
                 if source == "BreakSeq" and sv_type == "INS":
                     vcf_record.INFO["SVLEN"] = 0
+                elif source == "Delly":
+                    if sv_type == "CTX":
+                        vcf_record.INFO["SVLEN"] = 0
+                    else:
+                        vcf_record.INFO["SVLEN"] = vcf_record.INFO["END"] - vcf_record.POS
                 else:
                     continue
             # Handle broken header if SVLEN is reported as an array
             svlen = abs(vcf_record.INFO["SVLEN"]) if isinstance(vcf_record.INFO["SVLEN"], int) else abs(
                 vcf_record.INFO["SVLEN"][0])
-            if svlen < minsvlen:
+            if source == "Delly" and sv_type == "CTX":
+                next
+            elif svlen < minsvlen:
                 logger.warn("Skipping " + str(vcf_record) + " due to small size")
                 continue
             if svlen > maxsvlen:
@@ -140,16 +152,24 @@ def load_intervals(in_vcf, intervals={}, gap_intervals=[], include_intervals=[],
                 source in precise_sv_sources and sv_type == "INS") else wiggle
             if source == "Pindel" and sv_type == "INS":
                 vcf_record.POS += 1
-            interval = SVInterval(vcf_record.CHROM, vcf_record.POS, int(vcf_record.INFO["END"]), source, sv_type, svlen,
+            if source == "Delly" and sv_type == ("CTX" or "ITX"):
+                interval = SVInterval(vcf_record.CHROM, vcf_record.POS+1, int(vcf_record.INFO["END"]), source, 
+                                      sv_type, svlen, chrom2=vcf_record.INFO["CHR2"],sources=set([source]),
+                                      wiggle=wiggle,cipos=vcf_record.INFO["CIPOS"], gt=gt)
+            else:
+                interval = SVInterval(vcf_record.CHROM, vcf_record.POS, int(vcf_record.INFO["END"]), source, sv_type, svlen,
                                   sources=set([source]), wiggle=wiggle, gt=gt)
         if interval.sv_type not in svs_to_report:
             continue
         if interval_overlaps_interval_list(interval, gap_intervals):
             logger.warn("Skipping " + str(interval) + " due to overlap with gaps")
             continue
-        if not interval_overlaps_interval_list(interval, include_intervals, min_fraction_self=1.0):
-            logger.warn("Skipping " + str(interval) + " due to being outside the include regions")
-            continue
+        if source == "Delly" and interval.sv_type == ("CTX" or "ITX"):
+            next
+        else:
+            if not interval_overlaps_interval_list(interval, include_intervals, min_fraction_self=1.0):
+                logger.warn("Skipping " + str(interval) + " due to being outside the include regions")
+                continue
         interval.info = copy.deepcopy(vcf_record.INFO)
 
         if interval.sv_type not in intervals:
