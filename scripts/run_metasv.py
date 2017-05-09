@@ -38,6 +38,8 @@ if __name__ == "__main__":
                               default=[])
     input_parser.add_argument("--wham_vcf", nargs="+", help="VCF file or dir for WHAM VCFs",
                               default=[])
+    input_parser.add_argument("--delly_vcf", nargs="+", help="VCF file or dir for Delly VCFs",
+                              default=[])
                               
     input_parser.add_argument("--mean_read_length", type=float, default=MEAN_READ_LENGTH, help="Mean read length")
 
