@@ -90,6 +90,8 @@ if __name__ == "__main__":
                         default=MIN_INV_SUBALIGN_LENGTH)
     as_parser.add_argument("--min_del_subalign_len", help="Minimum length of deletion sub-alginment", type=int,
                         default=MIN_DEL_SUBALIGN_LENGTH)
+    as_parser.add_argument("--min_dup_subalign_len", help="Minimum length of duplication sub-alginment", type=int,
+                        default=MIN_DUP_SUBALIGN_LENGTH)
     as_parser.add_argument("--age_window", help="Window size for AGE to merge nearby breakpoints", type=int,
                         default=AGE_WINDOW_SIZE)
 

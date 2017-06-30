@@ -9,6 +9,17 @@ SVS_ASSEMBLY_SUPPORTED = set(["DEL", "INS" , "INV", "DUP"])
 SVS_SOFTCLIP_SUPPORTED = set(["DEL", "INS" , "INV", "DUP"])
 MEAN_READ_LENGTH=100
 
+
+#Support Filters for different sv callers
+# HG005: MIN_SUPPORT_PINDEL = {"LI":22 , "D": 7 , "INV": 9 , "I": 12 , "TD": 6 } 
+# HG006-7: MIN_SUPPORT_PINDEL = {"LI":15 , "D": 5 , "INV": 7 , "I": 6 , "TD": 5 } 
+# HG005-7: MIN_SUPPORT_BREAKDANCER = {"DEL": 3 } 
+
+MIN_SUPPORT_PINDEL = {"LI":1 , "D": 1 , "INV": 1 , "I": 1 , "TD": 1 } 
+MIN_SUPPORT_BREAKDANCER = {"DEL": 1 } 
+
+
+
 # For generating candidate intervals for insertion assembly
 MIN_SUPPORT_SC_ONLY = 2
 MIN_SUPPORT_INS = 15
@@ -60,6 +71,7 @@ AGE_TRUNCATION_PAD = 2000
 AGE_DIST_TO_BP = 100
 MIN_INV_SUBALIGN_LENGTH = 50
 MIN_DEL_SUBALIGN_LENGTH = 50
+MIN_DUP_SUBALIGN_LENGTH = 50
 AGE_WINDOW_SIZE = 20
 AGE_DIST_TO_EXP_BP_INS = 25
 

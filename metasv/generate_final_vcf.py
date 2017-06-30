@@ -156,16 +156,16 @@ def filter_confused_DUP_calls(nonfilterd_bed, filterd_bed, wiggle=20, overlap_fr
                                                            x.name.split(",")[
                                                                1] or "INV" in
                                                            x.name.split(",")[
-                                                               1]) or "INS" in
+                                                               1] or "INS" in
                                                            x.name.split(",")[
-                                                               1] and x.fields[
+                                                               1]) and x.fields[
                                                                            7] != "LowQual").saveas()
     if len(bedtool_good_nonDUP) == 0: 
         bedtool_filtered = bedtool_DUP
     else:
         bad_DUP = bedtool_DUP.window(bedtool_good_nonDUP, w=wiggle).filter(lambda x: min(abs(int(x[1])-int(x[9])),
-                                                                                             abs(int(x[2])-int(x[10])))<wiggle)
-        bedtool_filtered = bedtool_DUP.window(bad_DUP, w=wiggle, v=True).saveas()
+                                                                                             abs(int(x[2])-int(x[10])))<wiggle).sort()
+        bedtool_filtered = bedtool_DUP.intersect(bad_DUP, r=True,f=0.99, v=True).saveas()
 
     if len(bedtool_filtered) == 0:
         bedtool_others.saveas(filterd_bed)

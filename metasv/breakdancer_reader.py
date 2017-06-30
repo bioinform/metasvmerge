@@ -5,7 +5,7 @@ import os
 import vcf
 
 from sv_interval import SVInterval
-
+from defaults import MIN_SUPPORT_BREAKDANCER
 logger = logging.getLogger(__name__)
 
 mydir = os.path.dirname(os.path.realpath(__file__))
@@ -216,6 +216,8 @@ class BreakDancerReader:
             if line:
                 if line[0] != "#":
                     record = BreakDancerRecord(line)
+                    if record.sv_type in MIN_SUPPORT_BREAKDANCER and record.supporting_read_pairs < MIN_SUPPORT_BREAKDANCER[record.sv_type]:
+                        continue
                     if record.sv_type in self.svs_supported:
                         return record
                 else:

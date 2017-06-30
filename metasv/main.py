@@ -137,7 +137,9 @@ def run_metasv(args):
                                            assembly=assembled_fasta,
                                            pad=args.assembly_pad, age=args.age, timeout=args.age_timeout, chrs=list(contig_whitelist),
                                            nthreads=args.num_threads,
-                                           min_contig_len=AGE_MIN_CONTIG_LENGTH, min_del_subalign_len=args.min_del_subalign_len,
+                                           min_contig_len=AGE_MIN_CONTIG_LENGTH, 
+                                           min_del_subalign_len=args.min_del_subalign_len,
+                                           min_dup_subalign_len=args.min_dup_subalign_len,
                                            min_inv_subalign_len=args.min_inv_subalign_len,
                                            age_window=args.age_window,
                                            age_workdir=age_tmpdir, enabled=enable_flags[STEP_AGE_ALIGNMENT])

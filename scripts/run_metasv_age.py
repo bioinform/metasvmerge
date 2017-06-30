@@ -30,6 +30,8 @@ if __name__ == "__main__":
                         default=AGE_MAX_REGION_LENGTH)
     parser.add_argument("--min_del_subalign_len", help="Minimum length of deletion sub-alginment", type=int,
                         default=MIN_DEL_SUBALIGN_LENGTH)
+    parser.add_argument("--min_dup_subalign_len", help="Minimum length of duplication sub-alginment", type=int,
+                        default=MIN_DUP_SUBALIGN_LENGTH)
     parser.add_argument("--min_inv_subalign_len", help="Minimum length of inversion sub-alginment", type=int,
                         default=MIN_INV_SUBALIGN_LENGTH)
     parser.add_argument("--age_window", help="Window size for AGE to merge nearby breakpoints", type=int,
@@ -44,5 +46,7 @@ if __name__ == "__main__":
                      pad=args.pad, age=args.age.name, age_workdir=args.work, timeout=args.timeout,
                      keep_temp=args.keep_temp, assembly_tool=args.assembly_tool, chrs=args.chrs, nthreads=args.nthreads,
                      min_contig_len=args.min_contig_len, max_region_len=args.max_region_len, sv_types=args.sv_types,
-                     min_del_subalign_len=args.min_del_subalign_len, min_inv_subalign_len=args.min_inv_subalign_len,
+                     min_del_subalign_len=args.min_del_subalign_len, 
+                     min_dup_subalign_len=args.min_dup_subalign_len
+                     min_inv_subalign_len=args.min_inv_subalign_len,
                      age_window = args.age_window)

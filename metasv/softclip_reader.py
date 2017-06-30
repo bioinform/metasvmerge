@@ -118,5 +118,7 @@ class SoftClipReader:
                     continue
                 if record.sv_type in self.svs_supported:
                     return record
+                else:
+                    print record,record.sv_type
             else:
                 continue
