@@ -37,7 +37,7 @@ def check_duplicates(interval1, interval2, max_dist=10):
     if sources:
         info1["SOURCES"] = sources
     if "PASS" in [interval1.fields[7], interval2.fields[7]] or (
-            "AS" not in svmethods and len(set(svmethods) - {"SC", "AS"}) > 1):
+            "AS" not in svmethods and len(set(svmethods) - {"AS"}) > 1):
         sv_filter = "PASS"
     else:
         sv_filter = "LowQual"
@@ -95,7 +95,7 @@ def get_interval_info(feature, pass_calls):
         return None
 
     if sv_type != "INS":
-        svmethods_s = set(svmethods) - {"SC", "AS"}
+        svmethods_s = set(svmethods) - {"AS"}
         is_pass = len(svmethods_s) > 1
         if "AS" in svmethods:
             pos, end, svlen = map(int, feature.fields[6:9])
@@ -107,7 +107,7 @@ def get_interval_info(feature, pass_calls):
         if sv_type == "DEL":
             svlen = -svlen
     else:
-        if "SC" in svmethods or "AS" in svmethods:
+        if "AS" in svmethods:
             # TODO: I think it should be sub_types.index
             # index_to_use = [i for i,methods in enumerate(sub_methods) if ("SC" in methods) or ("AS" in svmethods)][0]
             pos, end, svlen = map(int, feature.fields[6:9])
@@ -117,8 +117,12 @@ def get_interval_info(feature, pass_calls):
         end = pos
         is_pass = (int(feature.fields[8]) != -1) and (
         svlen == 0 or svlen >= 100) and (
-                  ("SC" in svmethods or "AS" in svmethods) or (
-                  len(set(svmethods) - {"SC", "AS"}) > 1))
+#         svlen >=0)  and (
+#         svlen == 0 or (svlen >= 100 or ("AS" in svmethods))) and (
+                  ("AS" in svmethods) or (
+                  len(set(svmethods) - {"AS"}) > 1))
+        #SMES:should be fixed for varsim -ignore_svlen
+        svlen = 0
 
     if pos < 1:
         func_logger.info(
@@ -137,6 +141,42 @@ def get_interval_info(feature, pass_calls):
                      "sv_filter": sv_filter}
     return interval_info
 
+
+def filter_confused_DUP_calls(nonfilterd_bed, filterd_bed, wiggle=20, overlap_frac=0.7):
+    nonins_intervals = []
+    bedtool = pybedtools.BedTool(nonfilterd_bed)
+    bedtool_DUP = bedtool.filter(lambda x: "DUP" in x.name.split(",")[1]).sort()
+    if len(bedtool_DUP) == 0:
+        bedtool.saveas(filterd_bed)
+        return filterd_bed
+        
+    bedtool_others = bedtool.filter(
+        lambda x: "DUP" not in x.name.split(",")[1]).sort()
+    bedtool_good_nonDUP = bedtool_others.filter(lambda x: ("DEL" in
+                                                           x.name.split(",")[
+                                                               1] or "INV" in
+                                                           x.name.split(",")[
+                                                               1] or "INS" in
+                                                           x.name.split(",")[
+                                                               1]) and x.fields[
+                                                                           7] != "LowQual").saveas()
+    if len(bedtool_good_nonDUP) == 0: 
+        bedtool_filtered = bedtool_DUP
+    else:
+        bad_DUP = bedtool_DUP.window(bedtool_good_nonDUP, w=wiggle).filter(lambda x: min(abs(int(x[1])-int(x[9])),
+                                                                                             abs(int(x[2])-int(x[10])))<wiggle).sort()
+        bedtool_filtered = bedtool_DUP.intersect(bad_DUP, r=True,f=0.99, v=True).saveas()
+
+    if len(bedtool_filtered) == 0:
+        bedtool_others.saveas(filterd_bed)
+    elif len(bedtool_others) == 0:
+        bedtool_filtered.saveas(filterd_bed)
+    else:
+        bedtool_filtered = bedtool_filtered.cat(bedtool_others,
+                                                postmerge=False).sort().saveas(
+            filterd_bed)
+
+    return filterd_bed
 
 def filter_confused_INS_calls(nonfilterd_bed, filterd_bed, wiggle=20):
     nonins_intervals = []
@@ -162,9 +202,12 @@ def filter_confused_INS_calls(nonfilterd_bed, filterd_bed, wiggle=20):
                                 end + wiggle))
 
     bedtool_bp_nonINS = pybedtools.BedTool(nonINS_bp_intervals)
-    bad_INS = bedtool_INS.window(bedtool_bp_nonINS, w=wiggle)
-
-    bedtool_filtered = bedtool_INS.window(bad_INS, w=wiggle, v=True).saveas()
+    if len(bedtool_bp_nonINS) == 0: 
+        bedtool_filtered = bedtool_INS
+    else:
+        bad_INS = bedtool_INS.window(bedtool_bp_nonINS, w=wiggle)
+        bedtool_filtered = bedtool_INS.window(bad_INS, w=wiggle, v=True).saveas()
+        
     if len(bedtool_filtered) == 0:
         bedtool_others.saveas(filterd_bed)
     elif len(bedtool_others) == 0:
@@ -549,113 +592,117 @@ def resolve_for_IDP_ITX_CTX(vcf_records, fasta_file, pad=0, wiggle=10,
 def convert_metasv_bed_to_vcf(bedfile=None, vcf_out=None, workdir=None,
                               vcf_template_file=VCF_TEMPLATE, sample=None,
                               reference=None,
-                              pass_calls=True):
+                              pass_calls=True,
+                              enabled=True):
     func_logger = logging.getLogger("%s" % convert_metasv_bed_to_vcf.__name__)
+
     if not os.path.exists(workdir):
         os.makedirs(workdir)
 
-    intervals = []
-    if bedfile:
+    if enabled:
 
-        for interval in pybedtools.BedTool(bedfile):
-            interval_info = get_interval_info(interval, pass_calls)
-            if interval_info:
-                updated_interval = pybedtools.Interval(interval.chrom,
-                                                       interval_info["pos"],
-                                                       interval_info["end"],
-                                                       name="%s,%s,%d,%s" % (
-                                                           base64.b64encode(
-                                                               json.dumps(
-                                                                   interval_info[
-                                                                       "info"])),
-                                                           interval_info[
-                                                               "sv_type"],
-                                                           interval_info[
-                                                               "sv_length"],
-                                                           ";".join(
+        intervals = []
+        if bedfile and os.path.isfile(bedfile):
+            for interval in pybedtools.BedTool(bedfile):
+                interval_info = get_interval_info(interval, pass_calls)
+                if interval_info:
+                    updated_interval = pybedtools.Interval(interval.chrom,
+                                                           interval_info["pos"],
+                                                           interval_info["end"],
+                                                           name="%s,%s,%d,%s" % (
+                                                               base64.b64encode(
+                                                                   json.dumps(
+                                                                       interval_info[
+                                                                           "info"])),
                                                                interval_info[
-                                                                   "svmethods"])),
-                                                       score=interval.score,
-                                                       otherfields=[
-                                                           interval_info[
-                                                               "genotype"]
-                                                           , interval_info[
-                                                               "sv_filter"]])
-                if not intervals:
-                    intervals.append(updated_interval)
-                else:
-                    merged_interval = check_duplicates(updated_interval,
-                                                       intervals[-1])
-                    if merged_interval:
-                        func_logger.info("Merging intervals: %s and %s" % (
-                        updated_interval, intervals[-1]))
-                        intervals.pop()
-                        intervals.append(merged_interval)
-                    else:
+                                                                   "sv_type"],
+                                                               interval_info[
+                                                                   "sv_length"],
+                                                               ";".join(
+                                                                   interval_info[
+                                                                       "svmethods"])),
+                                                           score=interval.score,
+                                                           otherfields=[
+                                                               interval_info[
+                                                                   "genotype"]
+                                                               , interval_info[
+                                                                   "sv_filter"]])
+                    if not intervals:
                         intervals.append(updated_interval)
-            else:
-                func_logger.info("Skip interval: %s" % (interval))
+                    else:
+                        merged_interval = check_duplicates(updated_interval,
+                                                           intervals[-1])
+                        if merged_interval:
+                            func_logger.info("Merging intervals: %s and %s" % (
+                            updated_interval, intervals[-1]))
+                            intervals.pop()
+                            intervals.append(merged_interval)
+                        else:
+                            intervals.append(updated_interval)
+                else:
+                    func_logger.info("Skip interval: %s" % (interval))
 
-    nonfilterd_bed = os.path.join(workdir, "final_nonfilterd.bed")
-    filterd_bed = os.path.join(workdir, "final_filterd.bed")
-    bedtool = pybedtools.BedTool(intervals).sort().moveto(nonfilterd_bed)
-    filterd_bed = filter_confused_INS_calls(nonfilterd_bed, filterd_bed)
+        nonfilterd_bed = os.path.join(workdir, "final_nonfilterd.bed")
+        filterd_bed = os.path.join(workdir, "final_filterd.bed")
+        bedtool = pybedtools.BedTool(intervals).sort().moveto(nonfilterd_bed)
+        nonfilterd_bed = filter_confused_DUP_calls(nonfilterd_bed, filterd_bed)
+        filterd_bed = filter_confused_INS_calls(nonfilterd_bed, filterd_bed)
 
-    vcf_template_reader = vcf.Reader(open(vcf_template_file, "r"))
-    # The following are hacks to ensure sample name and contig names are put in the VCF header
-    vcf_template_reader.samples = [sample]
-    contigs = []
-    fasta_file = None
-    if reference:
-        contigs = fasta_utils.get_contigs(reference)
-        contigs_order_dict = {contig.name: index for (index, contig) in
-                              enumerate(contigs)}
-        vcf_template_reader.contigs = OrderedDict(
-            [(contig.name, (contig.name, contig.length)) for contig in contigs])
-        vcf_template_reader.metadata["reference"] = reference
-        fasta_file = pysam.Fastafile(reference)
+        vcf_template_reader = vcf.Reader(open(vcf_template_file, "r"))
+        # The following are hacks to ensure sample name and contig names are put in the VCF header
+        vcf_template_reader.samples = [sample]
+        contigs = []
+        fasta_file = None
+        if reference:
+            contigs = fasta_utils.get_contigs(reference)
+            contigs_order_dict = {contig.name: index for (index, contig) in
+                                  enumerate(contigs)}
+            vcf_template_reader.contigs = OrderedDict(
+                [(contig.name, (contig.name, contig.length)) for contig in contigs])
+            vcf_template_reader.metadata["reference"] = reference
+            fasta_file = pysam.Fastafile(reference)
 
-    vcf_template_reader.metadata["fileDate"] = str(datetime.date.today())
-    vcf_template_reader.metadata["source"] = [" ".join(sys.argv)]
-    vcf_writer = vcf.Writer(open(vcf_out, "w"), vcf_template_reader)
-    vcf_records = []
-    if filterd_bed:
-        bedtool = pybedtools.BedTool(filterd_bed)
-        for interval in bedtool:
-            name_split = interval.name.split(",")
-            info = json.loads(base64.b64decode(name_split[0]))
-            # Fix info
-            if "INSERTION_SEQUENCE" in info and (not info["INSERTION_SEQUENCE"] or info["INSERTION_SEQUENCE"] == "."):
-                del info["INSERTION_SEQUENCE"]
-            sv_type = name_split[1]
-            sv_id = "."
-            ref = fasta_file.fetch(str(interval.chrom), max(0,interval.start-1),
-                                   max(1, interval.start)) if fasta_file else "."
-            alt = [vcf.model._SV(sv_type)]
-            qual = "."
-            sv_filter = [interval.fields[7]]
-            genotype = interval.fields[6]
-            sv_format = "GT"
-            sample_indexes = [0]
-            vcf_record = vcf.model._Record(interval.chrom, interval.start,
-                                           sv_id, ref, alt, qual,
-                                           sv_filter, info, sv_format,
-                                           sample_indexes)
-            vcf_record.samples = vcf_template_reader._parse_samples([genotype],
-                                                                    "GT",
-                                                                    vcf_record)
-            vcf_records.append(vcf_record)
+        vcf_template_reader.metadata["fileDate"] = str(datetime.date.today())
+        vcf_template_reader.metadata["source"] = [" ".join(sys.argv)]
+        vcf_writer = vcf.Writer(open(vcf_out, "w"), vcf_template_reader)
+        vcf_records = []
+        if filterd_bed:
+            bedtool = pybedtools.BedTool(filterd_bed)
+            for interval in bedtool:
+                name_split = interval.name.split(",")
+                info = json.loads(base64.b64decode(name_split[0]))
+                # Fix info
+                if "INSERTION_SEQUENCE" in info and (not info["INSERTION_SEQUENCE"] or info["INSERTION_SEQUENCE"] == "."):
+                    del info["INSERTION_SEQUENCE"]
+                sv_type = name_split[1]
+                sv_id = "."
+                ref = fasta_file.fetch(str(interval.chrom), max(0,interval.start-1),
+                                       max(1, interval.start)) if fasta_file else "."
+                alt = [vcf.model._SV(sv_type)]
+                qual = "."
+                sv_filter = [interval.fields[7]]
+                genotype = interval.fields[6]
+                sv_format = "GT"
+                sample_indexes = [0]
+                vcf_record = vcf.model._Record(interval.chrom, interval.start,
+                                               sv_id, ref, alt, qual,
+                                               sv_filter, info, sv_format,
+                                               sample_indexes)
+                vcf_record.samples = vcf_template_reader._parse_samples([genotype],
+                                                                        "GT",
+                                                                        vcf_record)
+                vcf_records.append(vcf_record)
 
-    if contigs:
-        vcf_records.sort(key=lambda x: (contigs_order_dict[x.CHROM], x.POS))
-    else:
-        vcf_records.sort(key=lambda x: (x.CHROM, x.POS))
+        if contigs:
+            vcf_records.sort(key=lambda x: (contigs_order_dict[x.CHROM], x.POS))
+        else:
+            vcf_records.sort(key=lambda x: (x.CHROM, x.POS))
 
-    resolved_vcf_records = resolve_for_IDP_ITX_CTX(vcf_records, fasta_file)
+        resolved_vcf_records = vcf_records #resolve_for_IDP_ITX_CTX(vcf_records, fasta_file)
 
-    for vcf_record in resolved_vcf_records:
-        vcf_writer.write_record(vcf_record)
-    vcf_writer.close()
+        for vcf_record in resolved_vcf_records:
+            vcf_writer.write_record(vcf_record)
+        vcf_writer.close()
 
-    func_logger.info("Tabix compressing and indexing %s" % vcf_out)
-    pysam.tabix_index(vcf_out, force=True, preset="vcf")
+        func_logger.info("Tabix compressing and indexing %s" % vcf_out)
+        pysam.tabix_index(vcf_out, force=True, preset="vcf")

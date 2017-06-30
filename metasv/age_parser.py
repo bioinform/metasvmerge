@@ -269,8 +269,11 @@ class AgeRecord:
             return get_complement(self.assembly_contig[self.start2_end2s[0][1]-2: self.start2_end2s[1][0]-1: -1])
         return "."
 
-    def breakpoint_match(self, breakpoint, window=20):
-        return min(map(lambda x: abs(x - breakpoint), list(itertools.chain.from_iterable(self.start1_end1s)))) <= window
+    def breakpoint_match(self, breakpoint, window=20, bp_middle=False):
+        if not bp_middle or len(self.start1_end1s)<2:
+            return min(map(lambda x: abs(x - breakpoint), list(itertools.chain.from_iterable(self.start1_end1s)))) <= window
+        else:
+            return min(abs(self.start1_end1s[0][1] - breakpoint), abs(self.start1_end1s[1][0] - breakpoint)) <= window
 
     def has_long_flanks(self, min_len):
         return self.flanking_regions[0] >= min_len and self.flanking_regions[1] >= min_len + self.hom and min(

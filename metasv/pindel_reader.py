@@ -5,6 +5,7 @@ import os
 import vcf
 
 from sv_interval import SVInterval
+from defaults import MIN_SUPPORT_PINDEL
 
 logger = logging.getLogger(__name__)
 
@@ -293,5 +294,10 @@ class PindelReader:
             line = self.file_fd.next()
             if line.find("ChrID") >= 1:
                 record = PindelRecord(line.strip(), self.reference_handle)
+                if record.sv_type=="LI":
+                	if (record.up_read_supp + record.down_read_supp) < MIN_SUPPORT_PINDEL["LI"]:
+                		continue
+                elif record.read_supp < MIN_SUPPORT_PINDEL[record.sv_type]:
+                	continue
                 if PINDEL_TO_SV_TYPE[record.sv_type] in self.svs_supported:
                     return record

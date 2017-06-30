@@ -93,7 +93,7 @@ def parse_interval(interval):
             index_to_use = sub_types.index(sub_type)
             break
     sv_type = sub_types[index_to_use]
-    if (("SC" in sub_methods[index_to_use] and sv_type == "INS") or ("AS" in sub_methods[index_to_use])):
+    if "AS" in sub_methods[index_to_use]:
         pos, end, svlen = map(int, interval.fields[6:9])
 
     if svlen < 0: svlen = sub_lengths[index_to_use]
@@ -151,15 +151,22 @@ def genotype_intervals(intervals_file=None, bams=[], workdir=None, window=GT_WIN
 
 def parallel_genotype_intervals(intervals_file=None, bams=[], workdir=None, nthreads=1, chromosomes=[],
                                 window=GT_WINDOW, isize_mean=ISIZE_MEAN, isize_sd=ISIZE_SD,
-                                normal_frac_threshold=GT_NORMAL_FRAC):
+                                normal_frac_threshold=GT_NORMAL_FRAC, enabled=True):
     func_logger = logging.getLogger("%s-%s" % (parallel_genotype_intervals.__name__, multiprocessing.current_process()))
 
-    if not intervals_file:
-        func_logger.warning("No intervals file specified. Perhaps no intervals to process")
-        return None
 
     if workdir and not os.path.isdir(workdir):
         os.makedirs(workdir)
+
+    if not enabled:
+        genotype_bed = os.path.join(workdir, "genotyped.bed")
+        func_logger.info("Skipped genotyping STEP. Will use %s"%genotype_bed)
+        return genotype_bed
+
+    if not intervals_file or not os.path.isfile(intervals_file):
+        func_logger.warning("No intervals file specified. Perhaps no intervals to process")
+        return None
+
 
     chromosomes = set(chromosomes)
 

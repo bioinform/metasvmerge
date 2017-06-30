@@ -4,7 +4,7 @@ import multiprocessing
 from collections import defaultdict
 import pybedtools
 
-from defaults import MIN_INV_SUBALIGN_LENGTH, MIN_DEL_SUBALIGN_LENGTH,AGE_WINDOW_SIZE
+from defaults import MIN_INV_SUBALIGN_LENGTH, MIN_DEL_SUBALIGN_LENGTH, MIN_DUP_SUBALIGN_LENGTH, AGE_WINDOW_SIZE
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +19,8 @@ def get_insertion_breakpoints(age_records, intervals, expected_bp_pos, window=AG
     potential_breakpoints = sorted(list(set(
         [interval.start for interval in bedtools_intervals] + [interval.end for interval in bedtools_intervals])))
 
+    func_logger.info("Potential breakpoints as %s" % (str(potential_breakpoints)))
+
     breakpoints = []
     for breakpoint in potential_breakpoints[1:-1]:
         # Check if the breakpoint is within window distance of a validated breakpoint
@@ -27,10 +29,10 @@ def get_insertion_breakpoints(age_records, intervals, expected_bp_pos, window=AG
         func_logger.info("\tExamining potential breakpoint %d for support" % breakpoint)
         left_support = [interval[0] for interval in intervals if abs(interval[0] - breakpoint) <= window]
         right_support = [interval[1] for interval in intervals if abs(interval[1] - breakpoint) <= window]
-        counter_examples = [age_record for age_record in age_records if age_record.has_long_ref_flanks() and (
+        counter_examples = [age_record for age_record in age_records if age_record.has_long_ref_flanks(min_len=100) and (
             age_record.has_ref_deletion(window) or age_record.has_insertion(min_diff=20,
                                                                             max_diff=49)) and age_record.breakpoint_match(
-            breakpoint, window)]
+            breakpoint, window,bp_middle=True)]
         if counter_examples:
             counter_example_ends = [age_record.start1_end1s for age_record in counter_examples]
             func_logger.info("\t\tSkipping breakpoint %d due to %s" % (breakpoint, str(counter_example_ends)))
@@ -41,11 +43,21 @@ def get_insertion_breakpoints(age_records, intervals, expected_bp_pos, window=AG
         if right_support:
             func_logger.info("\t\tRight support %s" % (str(right_support)))
 
-        if (left_support and right_support) and min(
+        if (left_support and right_support) and (max(left_support) + 20) > min(right_support)  and min(
                         [window + 1] + [abs(b[0] - breakpoint) for b in breakpoints]) > window:
             both_support = [age_record for age_record in age_records if
                             age_record.has_insertion(min_diff=50, max_diff=1000000000) and age_record.breakpoint_match(
-                                breakpoint, window)]
+                                breakpoint, window,bp_middle=True)]
+            if not both_support:
+                potential_both_support = [age_record for age_record in age_records if len(age_record.start1_end1s)==2 and min(
+                                            map(lambda x:abs(age_record.start1_end1s[0][1]-x),right_support)) < 20 and min(
+                                            map(lambda x:abs(age_record.start1_end1s[1][0]-x),left_support)) < 20]
+                if potential_both_support:
+                    if not filter(lambda x: x.has_insertion(min_diff=50, max_diff=1000000000),potential_both_support):
+                        func_logger.info("\t\tSkipping breakpoint %d due to not supporting INS record %s" % (breakpoint, str(potential_both_support)))
+                        continue
+                    else:
+                        func_logger.info("\t\tGood potential_both_support %s" % (str(potential_both_support)))
             if both_support:
                 func_logger.info("\t\tboth_support = %s" % (str(both_support)))
                 func_logger.info("\t\tinsertion lengths = %s" % (
@@ -99,7 +111,7 @@ def check_closeness_to_bp(pos,pad,dist_to_expected_bp,LR_bp,seq_length=0):
 
 
 def get_inversion_breakpoints(age_records, window=20, min_endpoint_dist=10, start=0, pad=500, dist_to_expected_bp=400, min_inv_subalign_len=MIN_INV_SUBALIGN_LENGTH):
-    func_logger = logging.getLogger("%s-%s" % (get_deletion_breakpoints.__name__, multiprocessing.current_process()))
+    func_logger = logging.getLogger("%s-%s" % (get_inversion_breakpoints.__name__, multiprocessing.current_process()))
 
     potential_breakpoints = []
     for age_record in age_records:
@@ -208,6 +220,8 @@ def get_inversion_breakpoints(age_records, window=20, min_endpoint_dist=10, star
         potential_breakpoints += [bp1,bp2]
             
     potential_breakpoints=sorted(potential_breakpoints)
+    func_logger.info("Potential breakpoints as %s" % (str(potential_breakpoints)))
+
     breakpoints = []
     for breakpoint in potential_breakpoints:
         if min([window + 1] + [abs(b - breakpoint) for b in breakpoints]) >= window:
@@ -219,7 +233,7 @@ def get_inversion_breakpoints(age_records, window=20, min_endpoint_dist=10, star
 
 
 def get_duplication_breakpoints(age_records, window=20, max_endpoint_dist=10, start=0, pad=500, dist_to_expected_bp=400):
-    func_logger = logging.getLogger("%s-%s" % (get_deletion_breakpoints.__name__, multiprocessing.current_process()))
+    func_logger = logging.getLogger("%s-%s" % (get_duplication_breakpoints.__name__, multiprocessing.current_process()))
 
     potential_breakpoints = []
     for age_record in age_records:
@@ -233,29 +247,50 @@ def get_duplication_breakpoints(age_records, window=20, max_endpoint_dist=10, st
         elif len(left_end_near_l_bp)==1 and len(right_end_near_r_bp)==2:
             right_end_near_r_bp = list(set(right_end_near_r_bp)-set(left_end_near_l_bp))
         elif len(left_end_near_l_bp)==2 and len(right_end_near_r_bp)==2:
-            dist_to_exp_l_bp=map(lambda x: abs(min(age_record.start1_end1s[x])-pad),[0,1])
-            dist_to_exp_r_bp=map(lambda x: abs(max(age_record.start1_end1s[x])-(age_record.inputs[0].length-pad)),[0,1])
-            left_end_near_l_bp, right_end_near_r_bp = [[0],[1]]  if (dist_to_exp_l_bp[0]+dist_to_exp_r_bp[1]) < (dist_to_exp_l_bp[1]+dist_to_exp_r_bp[0]) else [[1],[0]]
+            if abs(age_record.start2_end2s[0][1]-age_record.start2_end2s[1][0])< 10:
+                left_end_near_l_bp, right_end_near_r_bp = [[0],[1]]  if (age_record.start1_end1s[0][1] < age_record.start1_end1s[1][0]) else [[1],[0]]
+            else:            
+                dist_to_exp_l_bp=map(lambda x: abs(min(age_record.start1_end1s[x])-pad),[0,1])
+                dist_to_exp_r_bp=map(lambda x: abs(max(age_record.start1_end1s[x])-(age_record.inputs[0].length-pad)),[0,1])
+                left_end_near_l_bp, right_end_near_r_bp = [[0],[1]]  if (dist_to_exp_l_bp[0]+dist_to_exp_r_bp[1]) < (dist_to_exp_l_bp[1]+dist_to_exp_r_bp[0]) else [[1],[0]]
         
         l_interval = left_end_near_l_bp[0]
         r_interval = right_end_near_r_bp[0]
         
         bp_idx_l = 0 if age_record.start1_end1s[l_interval][0]<age_record.start1_end1s[l_interval][1] else 1
         bp_idx_r = 1 if age_record.start1_end1s[r_interval][0]<age_record.start1_end1s[r_interval][1] else 0
+
+        if age_record.start1_end1s[l_interval][bp_idx_l]>age_record.start1_end1s[r_interval][bp_idx_r]:
+            func_logger.info('Left BP is larger than right BP in seq1: %s'%str(age_record))
+            continue            
+
         if abs(age_record.start2_end2s[l_interval][bp_idx_l]-age_record.start2_end2s[r_interval][bp_idx_r]) > 10:
             func_logger.info('BPs do not match in seq2: %s'%str(age_record))
             continue
         
         end_l_seq2 = age_record.start2_end2s[l_interval][1-bp_idx_l]
         end_r_seq2 = age_record.start2_end2s[r_interval][1-bp_idx_r]              
-        if max(min(end_r_seq2,end_l_seq2),
-               min(end_l_seq2-age_record.inputs[1].length,
-                   end_r_seq2-age_record.inputs[1].length)) > max_endpoint_dist:
-            func_logger.info('End points are too close to borders in Seq2: %s'%str(age_record))
+        end_l_seq1 = age_record.start1_end1s[l_interval][1-bp_idx_l]
+        end_r_seq1 = age_record.start1_end1s[r_interval][1-bp_idx_r]              
+#         if max(min(end_r_seq2,end_l_seq2),
+#                min(end_l_seq2-age_record.inputs[1].length,
+#                    end_r_seq2-age_record.inputs[1].length)) > max_endpoint_dist:
+#             func_logger.info('End points are too close to borders in Seq2: %s'%str(age_record))
+#             continue
+        if ((min(end_r_seq2,age_record.inputs[1].length-end_r_seq2
+               ) > max_endpoint_dist and min(
+               end_r_seq1,age_record.inputs[0].length-end_r_seq1) > max_endpoint_dist) or  (
+               min(end_l_seq2,age_record.inputs[1].length-end_l_seq2
+               ) > max_endpoint_dist and min(
+               end_l_seq1,age_record.inputs[0].length-end_l_seq1) > max_endpoint_dist)) and len(age_record.tr_region_1)==0:
+            func_logger.info('End points are too far to borders in Seq2: %s'%str(age_record))
             continue
         potential_breakpoints += [age_record.start1_end1s[l_interval][bp_idx_l],age_record.start1_end1s[r_interval][bp_idx_r]]
 
     potential_breakpoints=sorted(potential_breakpoints)
+
+    func_logger.info("Potential breakpoints as %s" % (str(potential_breakpoints)))
+
     breakpoints = []
     for breakpoint in potential_breakpoints:
         if min([window + 1] + [abs(b - breakpoint) for b in breakpoints]) >= window:
@@ -278,6 +313,7 @@ def get_reference_intervals(age_records, start=0, min_interval_len=100):
 
 def process_age_records(age_records, sv_type="INS", ins_min_unaligned=10, min_interval_len=200, pad=500,
                         min_deletion_len=30, min_del_subalign_len=MIN_DEL_SUBALIGN_LENGTH, 
+                        min_dup_subalign_len=MIN_DUP_SUBALIGN_LENGTH,
                         min_inv_subalign_len=MIN_INV_SUBALIGN_LENGTH, dist_to_expected_bp=400,
                         age_window=AGE_WINDOW_SIZE, pad_ins=0, sc_locations=[]):
     func_logger = logging.getLogger("%s-%s" % (process_age_records.__name__, multiprocessing.current_process()))
@@ -311,7 +347,7 @@ def process_age_records(age_records, sv_type="INS", ins_min_unaligned=10, min_in
                             len(age_record.start1_end1s) >= 2 and min(map(lambda x:abs(x[1]-x[0]),age_record.start1_end1s)) >= min_inv_subalign_len]
     elif sv_type == "DUP":
         good_age_records = [age_record for age_record in good_age_records if
-                            len(age_record.start1_end1s) == 2 and min(age_record.ref_flanking_regions) >= 100]
+                            len(age_record.start1_end1s) == 2 and min(age_record.ref_flanking_regions) >= min_dup_subalign_len]
     else:
         pass
     # Add some features to an info dict
@@ -355,6 +391,14 @@ def process_age_records(age_records, sv_type="INS", ins_min_unaligned=10, min_in
     # Add a few more features related to the breakpoints computed
     info["BA_NUM_BP"] = len(breakpoints)
 
+    if sv_type in ["INV","DUP","DEL"]:
+        if len(breakpoints) == 2:
+            pos1,pos2=map(int,[good_age_records[0].inputs[0].fname.split(".")[idx] for idx in [1,2]])
+            info["BA_BP_SCORE"] = max(abs(breakpoints[0]-pos1),abs(breakpoints[1]-pos2))
+            if info["BA_BP_SCORE"] > 100:
+                func_logger.info("False sv since resolved breakpoint not close to the expected location")
+                return [], dict(info)
+                
     if sv_type == "DEL":
         if len(breakpoints) == 2:
             func_logger.info("True deletion interval %s" % (str(breakpoints)))
@@ -367,8 +411,8 @@ def process_age_records(age_records, sv_type="INS", ins_min_unaligned=10, min_in
                 sc_locations = [sv_region.pos1 + pad_ins, sv_region.pos2 - pad_ins]
             min_diff = min(map(lambda x: abs(x - breakpoints[0][0]), sc_locations))
             info["BA_BP_SCORE"] = min_diff
-            if min_diff > 100:
-                func_logger.info("False insertion since resolved breakpoint not close to a soft-clip location")
+            if min_diff > 50:
+                func_logger.info("False insertion since resolved breakpoint not close to the expected location")
                 return [], dict(info)
             func_logger.info("True insertion interval %s" % (str(breakpoints)))
         else:

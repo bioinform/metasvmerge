@@ -9,6 +9,17 @@ SVS_ASSEMBLY_SUPPORTED = set(["DEL", "INS" , "INV", "DUP"])
 SVS_SOFTCLIP_SUPPORTED = set(["DEL", "INS" , "INV", "DUP"])
 MEAN_READ_LENGTH=100
 
+
+#Support Filters for different sv callers
+# HG005: MIN_SUPPORT_PINDEL = {"LI":22 , "D": 7 , "INV": 9 , "I": 12 , "TD": 6 } 
+# HG006-7: MIN_SUPPORT_PINDEL = {"LI":15 , "D": 5 , "INV": 7 , "I": 6 , "TD": 5 } 
+# HG005-7: MIN_SUPPORT_BREAKDANCER = {"DEL": 3 } 
+
+MIN_SUPPORT_PINDEL = {"LI":1 , "D": 1 , "INV": 1 , "I": 1 , "TD": 1 } 
+MIN_SUPPORT_BREAKDANCER = {"DEL": 1 } 
+
+
+
 # For generating candidate intervals for insertion assembly
 MIN_SUPPORT_SC_ONLY = 2
 MIN_SUPPORT_INS = 15
@@ -57,12 +68,26 @@ AGE_PAD = 500
 AGE_MAX_REGION_LENGTH = 1000000
 AGE_MAX_INTERVAL_TRUNCATION = 10000
 AGE_TRUNCATION_PAD = 2000
-AGE_DIST_TO_BP = 400
+AGE_DIST_TO_BP = 100
 MIN_INV_SUBALIGN_LENGTH = 50
 MIN_DEL_SUBALIGN_LENGTH = 50
+MIN_DUP_SUBALIGN_LENGTH = 50
 AGE_WINDOW_SIZE = 20
 AGE_DIST_TO_EXP_BP_INS = 25
 
 # For genotyping
 GT_WINDOW = 100
 GT_NORMAL_FRAC = 0.05
+
+
+STEP_LOAD = "load"
+STEP_MERGE = "merge"
+STEP_SPADES_ASSEMBLY = "spades_assembly"
+STEP_AGE_ALIGNMENT = "age_alignment"
+STEP_GENOTYPE = "genotype"
+STEP_GEN_VCF = "generate_vcf"
+STEPS = [STEP_LOAD, STEP_MERGE, STEP_SPADES_ASSEMBLY, STEP_AGE_ALIGNMENT, 
+         STEP_GENOTYPE, STEP_GEN_VCF]
+ENABLE_FLAGS = {}
+for (index, step) in enumerate(STEPS):
+    ENABLE_FLAGS[step] = {step_: index_ >= index for (index_, step_) in enumerate(STEPS)}
